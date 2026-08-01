@@ -103,46 +103,112 @@ Validated environment (see [Supported platforms](#supported-platforms)):
 
 - Windows 10 with WSL2 (Ubuntu recommended) — validated. Windows 11 is
   expected to work but has not been externally validated yet
-- WSL: `bash`, `git`, `tmux`, `flock`, `wslpath`, `realpath`
-- A separate installation of Firstmate in WSL (`~/firstmate` by default,
-  override with `FMW_FIRSTMATE_HOME`)
-- Agent harness: native Linux `pi` (the fmw shims enforce a Linux runtime)
-- `tasks-axi` CLI on the pane PATH for the Firstmate completion gate
+- WSL system packages: `bash`, `git`, `tmux`, `flock` (util-linux),
+  `wslpath`, `realpath` (coreutils)
+  (`sudo apt-get install -y git tmux util-linux coreutils`)
+- A Windows repository to orchestrate (any Git repo; the demo uses `MyApp`)
 - PowerShell and CMD interop enabled (WSL default) for Windows tool dispatch
+
+The installer (`bin/install.sh`) handles the user-space runtime for you:
+
+- native Linux Node under `~/.local/nodejs` (it does NOT download it; it
+  verifies it and prints the exact command if missing)
+- npm global prefix `~/.local/npm-global` (user-space, no sudo)
+- `tasks-axi` CLI (`npm i -g`) linked into `~/.local/bin`
+- `@earendil-works/pi-coding-agent` (`npm i -g`) — the Pi harness
+- the fmw shim links in `~/.local/bin` and the PATH entries in `~/.bashrc`
+- the Firstmate upstream clone (`~/firstmate`, NOT modified by fmw — you
+  clone it yourself; fmw only verifies it and creates its `state/`/`data/`)
+
+Manual steps the installer cannot do for you:
+
+- authenticating Pi (its API key, stored under `~/.pi/agent`)
+- cloning Firstmate upstream (printed command)
+- registering your repositories
 
 ## Installation
 
-There is no installer: setup is manual. Before using fmw you need Firstmate
-installed separately in WSL (upstream instructions), plus the Linux Node and
-Pi runtimes and the `tasks-axi` CLI — see [Requirements](#requirements).
-
-Clone this repository anywhere on Windows; the WSL side accesses it via
-`/mnt/c/...`:
+There is an idempotent, user-space installer: `bin/install.sh`. It never
+uses `sudo`, never touches the Windows global PATH, never modifies the
+Firstmate upstream, and backs up `~/.bashrc` before editing. Run it with
+`--dry-run` first to preview every step:
 
 ```bash
-# on Windows
+# 1. clone (Windows side; any location, e.g. C:\firstmate-win)
 git clone https://github.com/leonardorojo/firstmate-win.git C:\firstmate-win
 
-# in WSL (adjust the path)
+# 2. in WSL, from the clone:
 cd /mnt/c/firstmate-win
-bash bin/fmw doctor          # environment diagnostics
+bash bin/install.sh --dry-run     # preview: nothing changes
+bash bin/install.sh               # idempotent; safe to re-run
 ```
 
-The CLI must run inside WSL (`wslpath` is the runtime probe). Add a small
-alias in `~/.bashrc` if desired:
+What it does (8 steps, all reported):
+
+1. verifies system prerequisites (`git`, `tmux`, `flock`, `wslpath`,
+   `realpath`) and WSL access to `/mnt/c` — fails with the exact `apt`
+   command if anything is missing;
+2. verifies a native Linux `node`/`npm` on PATH and the fmw node runtime
+   (`~/.local/nodejs/bin/node` or `FMW_LINUX_NODE`) — prints the exact
+   download command if missing;
+3. installs `tasks-axi` into the user npm prefix and links it;
+4. installs the Pi package (`@earendil-works/pi-coding-agent`) and warns if
+   Pi is not yet authenticated;
+5. restores the executable bits of `bin/fmw` and the shims (a fresh clone
+   loses them: the public repo tracks them as non-executable);
+6. links `~/.local/bin/pi -> <repo>/bin/shims/pi` and adds the user-local
+   bin dirs to `~/.bashrc` (with a timestamped backup);
+7. verifies/creates the Windows worktree root (default
+   `C:\FirstmateWorktrees`; falls back with instructions if the drive root
+   needs admin);
+8. verifies the Firstmate upstream (`~/firstmate`, clone command printed if
+   missing) — fmw creates its `state/`/`data/` dirs automatically.
+
+What it does NOT install (manual, documented below): Firstmate upstream
+itself, the Linux Node download (it gives you the exact command), and the Pi
+API key. Environment overrides: `FMW_INSTALL_HOME`, `FMW_LOCAL_BIN`,
+`FMW_NPM_PREFIX`, `FMW_FIRSTMATE_HOME`, `FMW_LINUX_NODE`,
+`FMW_WORKTREE_ROOT_WINDOWS`.
+
+### After the installer: manual steps
 
 ```bash
+# 1. Firstmate upstream (fmw never modifies it; printed by the installer too)
+git clone https://github.com/kunchenguid/firstmate.git ~/firstmate
+#    then follow the upstream setup (deps, backends, api keys)
+
+# 2. authenticate Pi — run the pi CLI once and provide its API key
+#    (the key lives under ~/.pi/agent; a scout cannot start without it)
+
+# 3. PATH for new shells
+source ~/.bashrc
+
+# 4. verify the environment
+bash /mnt/c/firstmate-win/bin/fmw doctor     # expect: environment OK
+
+# 5. optional alias
 alias fmw='bash /mnt/c/firstmate-win/bin/fmw'
 ```
 
-Then register your repositories (see [Quick Start](#quick-start)).
+The CLI must run inside WSL (`wslpath` is the runtime probe). All runtime
+components live in WSL user space (`~/.local/*`, `~/firstmate`); your
+repositories and their worktrees stay on Windows (`C:\...`).
+
+Re-running `bin/install.sh` is always safe: it is idempotent (no duplicate
+PATH entries, no double links), detects partial installations, reports them
+with actionable messages, and never deletes anything. `--dry-run` changes
+nothing.
 
 ## Quick Start
 
-After installing Firstmate in WSL and cloning this repository:
+After `bin/install.sh`, the manual steps above, and `source ~/.bashrc`:
 
 ```bash
-# 1. register your repository (creates config/projects/<name>.conf)
+# 0. sanity check (expect: environment OK)
+fmw doctor
+
+# 1. register your repository (creates config/projects/<name>.conf; the
+#    worktree root C:\FirstmateWorktrees\MyApp must exist first)
 fmw project add --name MyApp \
   --windows-path "C:\MyApp" \
   --worktree-root "C:\FirstmateWorktrees\MyApp" \
@@ -167,8 +233,15 @@ fmw task status my-first-scout       # STATE -> done when finished
 fmw task teardown my-first-scout
 ```
 
+> `myapp` is a build profile: a small shell file implementing
+> `fmw_profile_validate|build|test|open` for your project (see
+> `profiles/*.sh` and the Configuration section). Read-only scouts do not
+> invoke it.
+
 See [docs/runbook.md](docs/runbook.md) for the full lifecycle, the completion
-gate setup (`tasks-axi`) and parallel execution.
+gate setup (`tasks-axi`), parallel execution and the watcher,
+[docs/troubleshooting.md](docs/troubleshooting.md) for failure diagnosis and
+[docs/rollback.md](docs/rollback.md) for uninstall/rollback.
 
 ## Configuration
 
@@ -451,6 +524,12 @@ Demonstrated end-to-end:
 ## Limitations
 
 - Requires a Windows machine with WSL2; no other platform is supported.
+- The clean-install flow (`bin/install.sh` → `fmw doctor` green → first
+  scout → teardown) was validated end-to-end in an isolated WSL sandbox
+  (fresh `HOME`, repo cloned from the public repository) on the developer
+  machine — NOT on a separate clean machine. A fresh Windows/WSL setup may
+  surface environment-specific steps (e.g. WSL installation, admin rights
+  for the worktree root, corporate proxies for npm).
 - Worktrees must live on a Windows drive (`/mnt/...`); native WSL paths are
   rejected by design.
 - Only the `pi` harness has been validated.

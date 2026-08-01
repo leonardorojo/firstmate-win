@@ -50,7 +50,35 @@ tmux set-environment -g PATH "<the original PATH without the shim>"
    `C:\FirstmateWorktrees` (only if no worktrees are wanted).
 4. The repositories and Firstmate (`~/firstmate`) stay intact.
 
-### 6. tasks-axi and its skill
+### 6. Installer components (user-space)
+
+Everything `bin/install.sh` touches lives under `~/.local` and `~/.bashrc`;
+each piece is removable independently, without sudo:
+
+```bash
+# Linux Node (user-space): delete the runtime dir
+rm -rf ~/.local/nodejs                      # (or wherever FMW_LINUX_NODE points)
+
+# npm global packages (user-space): uninstall via the same prefix
+npm uninstall -g --prefix ~/.local/npm-global tasks-axi
+npm uninstall -g --prefix ~/.local/npm-global @earendil-works/pi-coding-agent
+
+# Pi authentication (optional): the API key lives here
+rm -rf ~/.pi/agent
+
+# symlinks the installer created in ~/.local/bin
+rm -f ~/.local/bin/pi ~/.local/bin/tasks-axi
+
+# PATH entries the installer added to ~/.bashrc (restore the backup first)
+# a timestamped backup is created before the first edit:
+ls ~/.bashrc.fmw-backup-*                  # restore the latest one
+
+# the Windows worktree root (only if you want it gone; keep it if you keep
+# using fmw)
+rmdir /mnt/c/FirstmateWorktrees             # Windows side: C:\FirstmateWorktrees
+```
+
+### 7. tasks-axi and its skill
 
 ```bash
 # 1. remove the pane-PATH symlink
@@ -63,7 +91,7 @@ rm -rf ~/.agents/skills/tasks-axi
 #    (the expected behavior without the CLI on the pane PATH).
 ```
 
-### 7. Metadata reconciliation
+### 8. Metadata reconciliation
 
 `fmw task status` persists the terminal state (`done|blocked|failed`) in
 `state/tasks/<id>.conf` when `fm-crew-state.sh` confirms it. Reverting is

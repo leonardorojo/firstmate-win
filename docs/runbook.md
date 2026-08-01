@@ -1,5 +1,42 @@
 # Runbook — firstmate-win (fmw)
 
+## Installation from scratch
+
+```bash
+# 1. clone (Windows) and run the installer (WSL) — see README for details
+git clone https://github.com/leonardorojo/firstmate-win.git C:\firstmate-win
+cd /mnt/c/firstmate-win
+bash bin/install.sh --dry-run     # preview (changes nothing)
+bash bin/install.sh               # idempotent, user-space, no sudo
+
+# 2. manual steps the installer cannot do:
+git clone https://github.com/kunchenguid/firstmate.git ~/firstmate
+#    (follow the upstream setup; fmw never modifies it)
+#    authenticate pi once (its API key lives in ~/.pi/agent)
+source ~/.bashrc                  # PATH entries added by the installer
+
+# 3. verify
+fmw doctor                        # expect: environment OK
+```
+
+- **Reinstallation / re-run**: always safe — idempotent, no duplicate PATH
+  entries, no double links; `~/.bashrc` is backed up before any edit.
+- **Partial installation**: the installer fails with the exact next command
+  (e.g. missing node runtime, missing Firstmate). Apply it and re-run.
+- **Authentication**: Pi's API key is manual; without it a scout cannot
+  start (the installer warns when `~/.pi/agent` is absent).
+- **PATH diagnosis**: `fmw doctor` checks Linux Node, Pi and interop;
+  `command -v node pi tasks-axi` in the agent pane verifies the per-window
+  PATH (fmw arms the shims on spawn).
+- **Windows Node/Pi detected by mistake**: `node -p process.platform` must
+  print `linux`; the pi on PATH must be the fmw shim link
+  (`~/.local/bin/pi`). See docs/troubleshooting.md.
+- **tasks-axi missing**: the installer installs and links it; without it
+  the completion gate closes scouts in `blocked:`.
+- **Firstmate missing**: the installer prints the clone command and stops
+  (rc≠0); fmw creates `~/firstmate/state` and `~/firstmate/data` on the
+  first command (no manual step).
+
 ## Quick diagnostics
 
 ```bash
@@ -213,7 +250,23 @@ any commit/push/PR require explicit authorization.
 2. If the agent is alive: close it from Firstmate (or `fm-send.sh`).
 3. If the agent closed in `blocked:` because of the gate: install `tasks-axi`
    (section above) and re-send steering; do not restart the agent.
-4. If the window no longer exists: `fmw task teardown <id>` (requires a clean
-   worktree; if dirty, review and decide).
-5. Orphan worktrees not registered in fmw: do NOT touch them with fmw; review
+4. If the window no longer exists and the operative state is `unknown`
+   (agent lost), the explicit, traceable transition is:
+
+   ```bash
+   fmw task abandon <id> --reason "agent window lost"   # STATE=abandoned
+   fmw task teardown <id>                                # now eligible
+   ```
+
+   `abandon` is fail-closed: it refuses unless there is no window, the agent
+   is not busy, the operative state is `unknown`, the worktree exists/is
+   registered/clean at `BASE_REF`, the lock is acquirable and a human
+   explicitly runs the command. It NEVER marks the task `done`.
+5. `fmw task teardown <id>` (without `--force`) requires `STATE=done` or
+   `STATE=abandoned`; `blocked`/`failed` require review, not teardown.
+6. `fmw task teardown <id> --force` is the LAST-RESORT explicit destructive
+   authorization: it skips the STATE gate and discards worktree changes.
+   Use it only for a disposable task whose agent died mid-run (e.g. a frozen
+   `busy` busy-state after the window was killed) — never as a routine path.
+7. Orphan worktrees not registered in fmw: do NOT touch them with fmw; review
    with `git -C <repo> worktree list` and decide manually.

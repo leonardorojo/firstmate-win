@@ -20,11 +20,18 @@ Guide for agents (AI or human) working on this wrapper.
    cross-platform.
 7. **No commit/push/PR without authorization.** Never delete branches without
    authorization (teardown keeps `firstmate/<task>`).
+8. **Installation boundary**: `bin/install.sh` is the only installer; it owns
+   user-space setup (npm prefix, symlinks, `~/.bashrc` PATH with backup,
+   executable bits) and never touches sudo, the Windows global PATH or the
+   Firstmate upstream. `fmw_ensure_dirs` creates the upstream's
+   `state/`/`data/` dirs (a fresh clone lacks them).
 
 ## Structure
 
 ```text
 bin/fmw                  CLI (thin dispatch; the logic lives in lib/)
+bin/install.sh           user-space installer (idempotent, --dry-run; never
+                         sudo, never Windows global PATH, never upstream)
 bin/shims/treehouse      delegating shim (get/return of fmw tasks; rest delegates)
 lib/common.sh            base: dirs, log/die, utilities
 lib/config.sh            .conf parser/writer with allowlist, atomic write

@@ -42,6 +42,10 @@ fmw_need() {
 fmw_ensure_dirs() {
   mkdir -p "$FMW_TASKS_DIR" "$FMW_ARCHIVE_DIR" "$FMW_LOCKS_DIR" "$FMW_PROJECTS_DIR" \
     || fmw_die "could not create fmw state directories"
+  # the Firstmate upstream does not create its state/data dirs on a fresh
+  # clone; fmw owns the integration contract, so it ensures them
+  mkdir -p "$FMW_FIRSTMATE_HOME/state" "$FMW_FIRSTMATE_HOME/data" \
+    || fmw_die "could not create Firstmate state/data directories ($FMW_FIRSTMATE_HOME)"
 }
 
 # fmw_is_inside_wsl — detect the WSL runtime (wslpath is the canonical probe)
