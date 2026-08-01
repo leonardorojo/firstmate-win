@@ -165,6 +165,48 @@ fm_teardown_elegible=yes (...|no: reason)
 - `blocked`/`failed` are not eligible: they require review (steering or
   analysis), not teardown.
 
+## Resilience and recovery
+
+The wrapper is stateless between invocations: every owned resource lives on
+disk (repos and worktrees on Windows; task confs, Firstmate metadata, locks
+and reports under `state/` and `~/firstmate`). Killing an `fmw` process at
+any point loses nothing — state is written atomically and re-read on the
+next invocation.
+
+| Interruption | What persists | What is lost / needs re-arming |
+|--------------|---------------|--------------------------------|
+| `fmw` process killed mid-operation | task conf, worktree, metadata, lock state (flock is fd-based: released on process death) | nothing; the next `fmw task status` rebuilds the state |
+| Agent window / Pi process disappears | worktree, conf, metadata, report | the window and agent; `fmw task status` reports `fm_state=unknown` (source unavailable) and stays fail-closed (no invented `done`, no worktree removal) |
+| tmux server restart | worktree, conf, metadata | all windows and agents; the task is diagnosed with `fmw task status` (window absent, source unknown) |
+| WSL restart | repos, worktrees, confs, metadata, locks, Linux Node/Pi/tasks-axi, the wrapper | all processes: tmux server (windows, agents), watcher — must be re-armed |
+
+What does NOT recover automatically: tmux windows, agent processes and the
+watcher. A `spawned` task whose window is gone is NOT re-spawned (fail-closed):
+diagnose with `fmw task status <id>` (expect `fm_state=unknown`,
+`fm_window=no tmux window`, `STATE` unchanged) and resolve with teardown
+(requires authorization for real tasks) or re-creation.
+
+Recovery procedure after a WSL restart:
+
+```bash
+wsl.exe --terminate Ubuntu          # or wsl --shutdown — REQUIRES authorization
+# inside WSL, after the restart:
+bash ~/firstmate-win/bin/fmw doctor          # runtime sanity (Node/Pi/tasks-axi)
+tmux new-session -d -s firstmate            # re-arm the tmux server
+bash ~/firstmate/bin/fm-watch-arm.sh        # re-arm the watcher (tracked; NEVER shell &)
+fmw task status <id>                        # diagnose each affected task
+```
+
+Diagnostic commands: `fmw task status <id>` (persisted lifecycle + operative
+state + eligibility), `fmw doctor`, `git -C <repo> worktree list`, `tmux
+list-windows -a`, `ps aux | grep pi`.
+
+Known limits: the watcher is a cycle that exits on actionable wakes or on a
+stale window (see architecture); a stale window from an older task makes the
+watcher exit early — re-arm it. Teardown of real tasks, `wsl --shutdown` /
+`--terminate`, killing the real tmux server, `--force`, branch deletion and
+any commit/push/PR require explicit authorization.
+
 ## Resolving abandoned tasks
 
 1. `fmw task status <id>` → see window/state and `fm_teardown_elegible`.

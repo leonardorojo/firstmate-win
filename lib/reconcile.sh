@@ -93,7 +93,7 @@ fmw_task_reconcile() {
   fmw_task_load "$id" || return 1
   case "$STATE" in
     prepared|spawned) ;;
-    done|blocked|failed)
+    done|blocked|failed|abandoned)
       fmw_log "reconciliation: $id already terminal (STATE=$STATE); no change"
       return 0
       ;;
@@ -130,7 +130,8 @@ fmw_task_reconcile() {
 
 # fmw_task_teardown_elegible <id> — may teardown proceed without risk?
 #   Prints "yes (reason)" (rc=0) or "no: reason" (rc=1). Fail-closed:
-#   - only STATE=done (blocked/failed require review, not teardown);
+#   - only STATE=done|abandoned are eligible (blocked/failed require review,
+#     not teardown; abandoned = explicit operator authorization);
 #   - worktree present and clean;
 #   - no fm-<id> window, or a window whose busy-state is idle
 #     (in that case teardown requires a prior controlled close; a busy
@@ -138,8 +139,8 @@ fmw_task_reconcile() {
 fmw_task_teardown_elegible() {
   local id="$1" busy
   fmw_task_load "$id" || { echo "no: task not loadable"; return 1; }
-  [ "$STATE" = "done" ] || {
-    echo "no: STATE=$STATE (eligible only with STATE=done)"
+  [ "$STATE" = "done" ] || [ "$STATE" = "abandoned" ] || {
+    echo "no: STATE=$STATE (eligible only with STATE=done or STATE=abandoned)"
     return 1
   }
   [ -d "$WORKTREE_WSL_PATH" ] || {
