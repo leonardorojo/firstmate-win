@@ -59,7 +59,8 @@ rm -f ~/.local/bin/tasks-axi
 npm uninstall -g tasks-axi
 # 3. remove the global skill (installed via the skills CLI)
 rm -rf ~/.agents/skills/tasks-axi
-# 4. the gate will close scouts in blocked: again (previous behavior).
+# 4. without `tasks-axi` the completion gate closes scouts in `blocked:`
+#    (the expected behavior without the CLI on the pane PATH).
 ```
 
 ### 7. Metadata reconciliation

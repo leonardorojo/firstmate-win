@@ -1,7 +1,0 @@
-PROJECT_NAME='IngenieumApp'
-PROJECT_WINDOWS_PATH='C:\IngenieumApp'
-PROJECT_WSL_PATH='/mnt/c/IngenieumApp'
-PROJECT_WORKTREE_WINDOWS_ROOT='C:\FirstmateWorktrees\IngenieumApp'
-PROJECT_WORKTREE_WSL_ROOT='/mnt/c/FirstmateWorktrees/IngenieumApp'
-PROJECT_PROFILE='ingenieumapp'
-REGISTERED_AT='<ISO-8601-UTC>'

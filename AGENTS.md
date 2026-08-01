@@ -41,7 +41,7 @@ config/projects/*.conf   project registry (4 paths + profile)
 state/tasks/*.conf       task metadata (ownership)
 state/archive/*.conf     retired tasks (never deleted)
 tests/                   bash suites (run-all.sh)
-docs/                    architecture, runbook, rollback
+docs/                    architecture, design-decisions, runbook, rollback
 ```
 
 ## Contracts
