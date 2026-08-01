@@ -17,8 +17,11 @@ fmw task status <id>             # fmw metadata + Firstmate + git + window
 fmw task prepare --project <project> --id <task>
 fmw task brief <task> --scout
 fmw task spawn <task> --scout --harness pi
+fmw task send <task> "<mission — the scaffolded brief contains a {TASK} placeholder, so the agent waits for the real mission>"
 fmw task status <task>           # wait until the agent finishes (STATE=done)
-fmw task teardown <task>         # fail-closed; keeps the branch
+fmw task teardown <task>         # fail-closed; keeps the branch. Refuses while
+                                 # the fm-<task> window is still open: close the
+                                 # window first, then run teardown.
 ```
 
 ## Completion gate and tasks-axi

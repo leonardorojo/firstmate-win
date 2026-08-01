@@ -77,7 +77,7 @@ WSL
 └── tmux + git + agent harness (pi)
 
 Windows
-├── C:\<repo>              main checkout (never touched by fmw)
+├── C:\<repo>              main checkout (never modified by fmw)
 └── C:\FirstmateWorktrees
     └── <project>\<task>   per-task worktrees (branch firstmate/<task>)
 ```
@@ -101,7 +101,8 @@ Key components:
 
 Validated environment (see [Supported platforms](#supported-platforms)):
 
-- Windows 10/11 with WSL2 (Ubuntu recommended)
+- Windows 10 with WSL2 (Ubuntu recommended) — validated. Windows 11 is
+  expected to work but has not been externally validated yet
 - WSL: `bash`, `git`, `tmux`, `flock`, `wslpath`, `realpath`
 - A separate installation of Firstmate in WSL (`~/firstmate` by default,
   override with `FMW_FIRSTMATE_HOME`)
@@ -111,9 +112,12 @@ Validated environment (see [Supported platforms](#supported-platforms)):
 
 ## Installation
 
+There is no installer: setup is manual. Before using fmw you need Firstmate
+installed separately in WSL (upstream instructions), plus the Linux Node and
+Pi runtimes and the `tasks-axi` CLI — see [Requirements](#requirements).
+
 Clone this repository anywhere on Windows; the WSL side accesses it via
-`/mnt/c/...`. The repository layout is fully relative — there is no install
-step:
+`/mnt/c/...`:
 
 ```bash
 # on Windows
@@ -131,8 +135,7 @@ alias in `~/.bashrc` if desired:
 alias fmw='bash /mnt/c/firstmate-win/bin/fmw'
 ```
 
-Install Firstmate separately (upstream instructions) before registering
-repositories.
+Then register your repositories (see [Quick Start](#quick-start)).
 
 ## Quick Start
 
@@ -150,10 +153,17 @@ fmw task prepare --project MyApp --id my-first-scout
 fmw task brief my-first-scout --scout
 fmw task spawn my-first-scout --scout --harness pi
 
-# 3. wait for the agent to finish, then check the state
+# 3. give the scout its actual mission — the scaffolded brief still
+#    contains a {TASK} placeholder, so the agent waits until it receives
+#    the real one:
+fmw task send my-first-scout "Inspect the repository architecture. Read only. Produce the report requested by the brief."
+
+# 4. wait for the agent to finish, then check the state
 fmw task status my-first-scout       # STATE -> done when finished
 
-# 4. remove the task worktree (the branch is kept)
+# 5. remove the task worktree (the branch is kept). Teardown refuses while
+#    the task window (fm-my-first-scout) is still open: close the window
+#    first, then run teardown.
 fmw task teardown my-first-scout
 ```
 
@@ -273,6 +283,8 @@ prepare -> spawned -> {done|blocked|failed} -> torn-down
    state (authoritative source: `fm-crew-state.sh`), git, window, and
    teardown eligibility.
 6. `fmw task teardown T` — fail-closed removal; the branch is always kept.
+   If the task window (`fm-T`) is still open, teardown refuses with
+   "active Firstmate agent": close the window first, then run teardown.
 
 Branches are **never** deleted without explicit authorization. Metadata is
 archived (`state/archive/`) on teardown, never destroyed.
@@ -410,7 +422,8 @@ Broad engineering directions, no commitments or dates:
 
 Validated only on:
 
-- Windows 10/11, WSL2 Ubuntu
+- Windows 10 + WSL2 Ubuntu — validated. Windows 11: expected to work, not
+  yet externally validated
 - tmux (isolated test sockets; real server untouched)
 - Git worktrees (WSL git as lifecycle owner)
 - PowerShell / CMD interop

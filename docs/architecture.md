@@ -20,7 +20,7 @@ WSL
 └── tmux + git + harnesses (pi)
 
 Windows
-├── C:\<repo>              main checkout (never touched by fmw)
+├── C:\<repo>              main checkout (never modified by fmw)
 └── C:\FirstmateWorktrees
     ├── <project>\<task>   task worktrees (branch firstmate/<task>)
 ```
