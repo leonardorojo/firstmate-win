@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# bin/shims/treehouse — delegating treehouse shim for firstmate-win (fmw)
+#
+# Purpose: hand Firstmate a worktree PRE-CREATED by fmw without modifying the
+# upstream. Does NOT reimplement the treehouse pool.
+#
+# Rules (fail-closed):
+#   - `treehouse get` (no flags) inside a tmux window `fm-<id>` with an fmw
+#     task in prepared|spawned state -> enter the task worktree.
+#     Explicit override for tests/direct invocation: FMW_TASK_WORKTREE.
+#   - `treehouse return [--force] <path>` where <path> is a worktree
+#     registered by fmw -> translated to `git worktree remove` on the task
+#     repo (only with ownership confirmed by the fmw conf).
+#   - Any other invocation -> delegate to the real treehouse (same PATH,
+#     excluding this directory).
+#
+# Runtime: WSL.
+
+set -uo pipefail
+
+FMW_SHIM_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+FMW_HOME="$(cd "$FMW_SHIM_DIR/../.." && pwd)"
+FMW_STATE="${FMW_STATE:-$FMW_HOME/state}"
+FMW_TASKS_DIR="${FMW_TASKS_DIR:-$FMW_STATE/tasks}"
+FMW_ARCHIVE_DIR="${FMW_ARCHIVE_DIR:-$FMW_STATE/archive}"
+
+# self-check (tests): print the resolved paths and exit. Needed because the
+# shim is installed as a symlink in ~/.local/bin: BASH_SOURCE points at the
+# symlink and without readlink -f FMW_HOME would derive from the symlink dir
+# (nonexistent state).
+if [ "${FMW_SHIM_SELFCHECK:-0}" = "1" ]; then
+  printf 'FMW_HOME=%s\nFMW_STATE=%s\nFMW_TASKS_DIR=%s\n' "$FMW_HOME" "$FMW_STATE" "$FMW_TASKS_DIR"
+  exit 0
+fi
+
+# find_real_treehouse — the real treehouse, excluding this shim from PATH
+find_real_treehouse() {
+  local dir
+  local -a dirs
+  IFS=: read -r -a dirs <<< "$PATH"
+  for dir in "${dirs[@]}"; do
+    [ -n "$dir" ] || continue
+    [ "$(cd "$dir" 2>/dev/null && pwd)" = "$FMW_SHIM_DIR" ] && continue
+    if [ -x "$dir/treehouse" ]; then
+      # The shim itself may be linked from other PATH dirs (~/.local/bin):
+      # exclude it so we do not delegate to ourselves (recursion).
+      if [ "$(readlink -f "$dir/treehouse" 2>/dev/null)" = "$FMW_SHIM_DIR/treehouse" ]; then
+        continue
+      fi
+      printf '%s/treehouse' "$dir"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# exec_real <args...> — delegate to the real treehouse (replaces the process)
+exec_real() {
+  local real
+  real="$(find_real_treehouse)" || {
+    echo "treehouse shim: real treehouse not found on PATH" >&2
+    return 127
+  }
+  exec "$real" "$@"
+}
+
+# conf_val <conf> <KEY> — value of a key (minimal parser, read-only)
+conf_val() {
+  local conf="$1" key="$2"
+  grep -E "^${key}=" "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'"
+}
+
+# fmw_registered_worktree <path> — is path a worktree registered by fmw?
+#   Prints the conf path (tasks or archive) on match; rc=1 otherwise.
+fmw_registered_worktree() {
+  local path="$1" tconf p w
+  p="$(realpath -m "$path" 2>/dev/null)"
+  for tconf in "$FMW_TASKS_DIR"/*.conf "$FMW_ARCHIVE_DIR"/*.conf; do
+    [ -f "$tconf" ] || continue
+    w="$(conf_val "$tconf" WORKTREE_WSL_PATH)"
+    [ -n "$w" ] || continue
+    if [ "$p" = "$(realpath -m "$w" 2>/dev/null)" ]; then
+      printf '%s' "$tconf"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# shim_get — `treehouse get` (no flags): fmw worktree or delegation
+shim_get() {
+  local wname="" id="" tconf="" wt="" st=""
+  if [ -n "${FMW_TASK_WORKTREE:-}" ]; then
+    wt="$FMW_TASK_WORKTREE"
+  else
+    if command -v tmux >/dev/null 2>&1; then
+      # display-message WITHOUT target returns the ACTIVE window of the
+      # session, not the one running the shim (real bug: with window 0 "bash"
+      # active, fm-<id> never matched and the real treehouse was called).
+      # TMUX_PANE identifies the current pane -> explicit target.
+      local tgt=""
+      [ -n "${TMUX_PANE:-}" ] && tgt="-t ${TMUX_PANE}"
+      # shellcheck disable=SC2086
+      wname="$(tmux display-message -p $tgt '#{window_name}' 2>/dev/null || true)"
+    fi
+    case "$wname" in
+      fm-*)
+        id="${wname#fm-}"
+        tconf="$FMW_TASKS_DIR/$id.conf"
+        if [ -f "$tconf" ]; then
+          st="$(conf_val "$tconf" STATE)"
+          case "$st" in
+            prepared|spawned) wt="$(conf_val "$tconf" WORKTREE_WSL_PATH)" ;;
+          esac
+        fi
+        ;;
+    esac
+  fi
+  if [ -n "$wt" ] && [ -d "$wt" ]; then
+    cd "$wt" || { echo "treehouse shim: could not enter $wt" >&2; return 1; }
+    exec "${SHELL:-bash}"
+  fi
+  exec_real get
+}
+
+# shim_return <args...> — `treehouse return`: translation for fmw worktrees
+shim_return() {
+  local force=0 path="" a
+  for a in "$@"; do
+    case "$a" in
+      --force) force=1 ;;
+      *) [ -z "$path" ] && path="$a" ;;
+    esac
+  done
+  if [ -z "$path" ]; then
+    exec_real return "$@"
+    return 127
+  fi
+  local tconf repo
+  tconf="$(fmw_registered_worktree "$path")" || { exec_real return "$@"; return 127; }
+  repo="$(conf_val "$tconf" REPOSITORY_WSL_PATH)"
+  [ -n "$repo" ] || {
+    echo "treehouse shim: fmw conf without REPOSITORY_WSL_PATH: $tconf" >&2
+    return 1
+  }
+  if [ "$force" = 1 ]; then
+    git -C "$repo" worktree remove --force "$path"
+  else
+    git -C "$repo" worktree remove "$path"
+  fi
+  return $?
+}
+
+# --- dispatch ---
+cmd="${1:-}"
+case "$cmd" in
+  get)
+    if [ $# -eq 1 ]; then shim_get; else exec_real get "${@:2}"; fi
+    ;;
+  return)
+    shim_return "${@:2}"
+    ;;
+  *)
+    exec_real "$@"
+    ;;
+esac

@@ -1,0 +1,227 @@
+# Architecture — firstmate-win (fmw)
+
+## Deployment model
+
+```text
+WSL
+├── ~/firstmate            Firstmate upstream (INTACT, installable)
+├── ~/firstmate-win        fmw (this repository)
+│   ├── bin/fmw            CLI
+│   ├── bin/shims/         treehouse (delegating), node/npm/npx/pi
+│   │                      (Linux runtime guaranteed)
+│   ├── lib/               common config paths safety projects worktrees
+│   │                      windows firstmate reconcile
+│   ├── profiles/          civilplan.sh ingenieumapp.sh (reference adapters)
+│   ├── config/projects/   *.conf (4 paths + profile per project)
+│   └── state/{tasks,archive,locks}/
+├── ~/.local/nodejs        native Linux Node (v24.x)
+├── ~/.local/npm-global    Linux npm prefix (pi, tasks-axi)
+├── ~/.local/bin           symlinks: node/npm/npx/pi/tasks-axi (pane PATH)
+└── tmux + git + harnesses (pi)
+
+Windows
+├── C:\<repo>              main checkout (never touched by fmw)
+└── C:\FirstmateWorktrees
+    ├── <project>\<task>   task worktrees (branch firstmate/<task>)
+```
+
+## Boundaries and responsibilities
+
+| Boundary | Owner | Mechanism |
+|----------|-------|-----------|
+| Worktree create/remove | WSL git (fmw) | `git worktree add/remove/prune` |
+| Windows↔WSL paths | fmw | `wslpath -u/-w` + `realpath -m` + guards |
+| Orchestration (briefs, spawn, supervision) | Firstmate | official scripts |
+| Worktree delivery to the agent | `treehouse` shim | window `fm-<id>` → cd to the worktree |
+| Completion gate (`decision-hold`) | tasks-axi (Linux) | `command -v tasks-axi` in the pane + `fm-decision-hold.sh complete/verify` |
+| Build/test | Windows tools | MSBuild.exe / PowerShell / CMD (interop) |
+| Teardown | fmw (fail-closed) | conf + git + root + branch + lock |
+
+## Task flow
+
+```text
+fmw task prepare --project P --id T
+  → validate id/project/root → lock → git worktree add -b firstmate/T <root>/T
+  → verify (git worktree list --porcelain) → atomic metadata STATE=prepared
+
+fmw task brief T [--scout]        → fm-brief.sh T <repo> [--scout]
+fmw task spawn T [--scout] ...    → arm the shim in the tmux global PATH
+  → fm-spawn.sh T <repo-wsl-path> [flags]
+  → window fm-T: 'treehouse get' → shim → cd <worktree> → agent
+  → linked meta: STATE=spawned, FIRSTMATE_ENDPOINT=window
+
+fmw task status T                 → fmw metadata + Firstmate meta + git + tmux
+                                   → reconcile the authoritative terminal state
+                                   → persisted lifecycle + operative state +
+                                     teardown eligibility
+fmw build/test --task T           → profile → MSBuild/vstest over the worktree
+fmw task teardown T               → no active agent + git registered + clean
+  → git worktree remove → archive conf (STATE=torn-down) → branch kept
+```
+
+## Security (fail-closed)
+
+- **Paths**: every worktree must resolve under `/mnt/<drive>/`; `/home`,
+  `/tmp`, `/var`, `/root` are rejected (two layers: project root and task
+  target).
+- **Ownership**: teardown requires `state/tasks/<id>.conf` (atomic write,
+  allowlist), basename match, root, branch and `git worktree list`.
+- **Active agent**: teardown refuses while a tmux window `fm-<id>` exists.
+- **Teardown eligibility**: only with `STATE=done` (persisted by the
+  authoritative source) + clean worktree + non-busy agent; a live window with
+  busy-state `idle` is eligible after a controlled close; missing or `busy`
+  busy-state ⇒ not eligible.
+- **Local changes**: teardown rejects dirty worktrees unless `--force` is
+  explicit.
+- **Shim**: only intercepts `treehouse get` (windows `fm-<id>` with a task in
+  prepared/spawned) and `treehouse return` of fmw-registered paths; everything
+  else delegates to the real treehouse. It does not reimplement the pool.
+- **Locks**: `flock` per task id around mutable operations.
+
+## Parallelism and multi-task isolation
+
+The system supports N concurrent tasks without shared resources between them.
+Each task is a **disjoint set of identifiers and resources**:
+
+| Resource | Isolated by | Mechanism |
+|----------|-------------|-----------|
+| tmux window | task-id | `fm-<id>` (one per task; created and registered by `fm-spawn.sh`) |
+| Agent process | task-id | one pi process per window (harness), started by the shim |
+| Worktree | task-id | `C:\FirstmateWorktrees\<project>\<id>`, branch `firstmate/<id>` |
+| fmw metadata | task-id | `state/tasks/<id>.conf` + `state/locks/<id>.lock` (flock per task) |
+| Firstmate metadata | task-id | `state/<id>.meta`, `state/<id>.busy-state`, `state/<id>.status`, `state/<id>.pi-ext.ts` |
+| Brief/report | task-id | `data/<id>/brief.md`, `data/<id>/report.md` |
+| Supervision events | task-id | busy-gen/seq and turn-ended per task; consolidated wakes by the watcher |
+
+Design points that make parallelism possible without upstream changes:
+
+- **The `treehouse` shim resolves by window name**: the spawn arms the shim in
+  the tmux global PATH once (idempotent, via `tmux set-environment -g`); each
+  `fm-<id>` window runs `treehouse get` and the shim delivers the worktree of
+  ITS task. Concurrent spawns do not race: locks are per task-id and the shim
+  is read-only over registered paths.
+- **One watcher supervises N tasks**: `fm-watch.sh` is a singleton-locked
+  process that classifies wakes of ALL tasks of the home. Benign signals (with
+  busy-state `busy`) are absorbed; actionable ones are queued into one
+  consolidated wake, then the watcher exits (reason=actionable-signal, exit
+  0). The captain re-arms it with `fm-watch-arm.sh` (tracked process; NEVER a
+  shell `&`, which gets reaped and leaves supervision down).
+- **Per-task events**: each task's busy-state is a separate file with its own
+  sequence (`gen`/`seq`); one task's `done:` does not alter another task's
+  busy-state or status.
+- **Per-task reconciliation and gate**: `fmw task status <id>` reconciles and
+  persists ONLY the indicated task; teardown eligibility is evaluated per task
+  and never touches other worktrees/windows.
+
+### Observed limits (validated 2026-07-31)
+
+1. **The watcher is not a permanent daemon**: every cycle ends on the first
+   actionable wake (by design: notify the captain). With tasks in flight it
+   must be re-armed after each cycle; the `WATCHER DOWN` banner printed by
+   fmw at spawn when the beacon is stale (>grace 300s) is informational and
+   does not block the operation.
+2. **Scaffolded brief with literal `{TASK}`**: `fm-brief.sh --scout` writes
+   the standard contract with the placeholder that the Firstmate captain LLM
+   fills in. Without an active captain, the agent starts in
+   `needs-decision` and only proceeds after receiving the mission via
+   `fmw task send` (official steering).
+3. **Orphan wakes**: after a task teardown, the wakes of its status remain in
+   `.wake-queue` (historical records). Harmless; cleaned with
+   `fm-wake-drain.sh` (atomic drain, closes the supervision cycle).
+4. **Idle pi processes**: after `agent-settled`, the pi process stays alive in
+   its window waiting for input (the normal state of a task without teardown).
+   Teardown closes the window and terminates it.
+5. **`no registry at data/projects.md` notice**: benign; the no-mistakes mode
+   does not apply to scouts (kind=scout → report, no merge).
+
+### Recommendations (routine parallelism)
+
+- Arm the watcher BEFORE the spawns and re-arm it after each cycle.
+- Send the specific mission (`fmw task send`) right after each spawn.
+- Drain `.wake-queue` after each watcher cycle.
+- Concurrent spawns are safe (per-task locks), but prepare and brief both
+  tasks before launching the spawns.
+
+## State model and reconciliation (Design C)
+
+### Two planes, never mixed
+
+- **Persisted** (`STATE` in `state/tasks/<id>.conf`) = worktree lifecycle and
+  ownership. Documented transition:
+  `prepared → spawned → {done|blocked|failed} → torn-down`.
+- **Operative** = the agent's current situation according to Firstmate:
+  `working | parked | done | blocked | paused | failed | unknown`.
+  It is dynamic: recomputed on every `fmw task status`.
+
+### Authoritative source
+
+`fm-crew-state.sh <id>` from Firstmate (upstream, unmodified). It is the
+deterministic reader of current state: it reconciles run-step → pane busy →
+status-log. The status-log is **not** current state (it is an append-only
+event log): the last `done:` line counts only if the pane is not busy and is
+readable; a dead/unreadable pane ⇒ `unknown` even when the log says `done:`.
+
+### Decision: Design C (hybrid)
+
+| Design | What it persists | Problem |
+|--------|------------------|---------|
+| A | every state with evidence | persists transients (working/parked) and mixes operative into lifecycle; conf churn on every status |
+| B | `FMW_STATE=spawned` + `FIRSTMATE_STATE=done` | keeps the separation but leaves the wrapper blind: cannot tell done from abandoned and does not enable the teardown gate |
+| **C** | **only reliable terminals (`done|blocked|failed`) confirmed by the source; transients stay dynamic** | no churn, fail-closed, idempotent, test-compatible |
+
+Criteria applied: current code (allowlist conf, atomic write), teardown
+invariants (gate by `STATE=done`), compatibility (tests assume
+`STATE=spawned` right after spawn — without terminal evidence nothing is
+persisted) and false-positive risk (zero local rules; the Firstmate
+reconciliation is delegated).
+
+### Reconciliation rules (`lib/reconcile.sh`)
+
+1. Acts only on `prepared|spawned` lifecycles (never on `torn-down`).
+2. Persists `done|blocked|failed` only when `fm-crew-state.sh` emits them;
+   `working|parked|paused|idle|unknown` are never persisted.
+3. `.turn-ended` and `report.md` are complementary evidence of the status, not
+   a source: alone they never mark `done`.
+4. Fail-closed: missing/failed/unparseable source ⇒ `STATE` unchanged and the
+   task is not teardown-eligible.
+5. Idempotent: re-running over a reconciled conf does not alter it (verified
+   with `cmp` in the tests).
+6. `blocked` is terminal but recoverable: reconciliation re-evaluates on every
+   status and will overwrite `blocked → done` when the crew finishes.
+7. Reconciliation only reads the source and writes the conf: it never touches
+   windows, processes, worktrees or the upstream.
+
+### Teardown eligibility
+
+`fmw_task_teardown_elegible` = `STATE=done` + worktree present and clean +
+agent not busy (no `fm-<id>` window, or a window with busy-state `idle` →
+requires a prior controlled close; `busy`/missing/unreadable ⇒ not eligible).
+`blocked` and `failed` require captain review, not teardown.
+
+## Performance (measured)
+
+- `git status` on a 1337-file Windows repo from WSL: ~39 s first pass.
+- `git worktree add` from WSL over a Windows repo: ~11 s.
+- Windows profiles run native MSBuild (never Linux `dotnet`).
+
+## Recorded decisions
+
+1. **Independent wrapper** (not a fork): upstream updates without rework.
+2. **`treehouse` shim** instead of patching upstream: the alternative options
+   (existing API, composition, env vars, point wrapper) were rejected with
+   evidence; the shim is delegating and never reimplements the pool.
+3. **fmw owns the teardown** of its tasks; the shim translates
+   `treehouse return` so `fm-teardown.sh` also works unchanged.
+4. **`fmw task send` exports `FM_HOME`** when invoking `fm-send.sh`: the
+   upstream script is fail-closed and rejected steering without that variable
+   (real wrapper bug, fixed with a regression test).
+5. **Linux runtime by default in the shims**: `node`/`npm`/`npx`/`pi`/
+   `tasks-axi` resolve under the Linux home (never `/mnt/`); the `node.exe`
+   bridge requires `FMW_USE_WINDOWS_NODE=1`. Without tasks-axi in the pane,
+   the gate closes in `blocked:`.
+6. **Reconciliation = Design C with `fm-crew-state.sh` as the single source**:
+   only reliable terminals (`done|blocked|failed`) are persisted; transients
+   are computed dynamically; fail-closed on missing/failed source;
+   `.turn-ended`/`report.md` are never a source. A (transient churn in the
+   lifecycle conf) and B (wrapper blind to the final state; no teardown gate)
+   were rejected.

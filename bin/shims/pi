@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bin/shims/pi — native Linux Pi for firstmate-win (fmw)
+#
+# Pi (@earendil-works/pi-coding-agent) is installed as a global npm package of
+# the Linux Node runtime (prefix ~/.local/npm-global). Its dist/cli.js has
+# shebang "#!/usr/bin/env node": run via PATH it would fall into the bridge
+# ~/.local/bin/node (Windows node.exe) and Pi would run as a Windows process.
+# This shim runs the Linux node directly over the package cli.js.
+set -uo pipefail
+
+# Pi subprocesses that invoke `node` via PATH (e.g. .pi-ext.ts extensions)
+# must land on Linux Node, NOT on the node.exe bridge (root cause of the
+# "WSL scripts from node.exe" bug documented in fm-spawn.sh).
+export FMW_USE_LINUX_NODE=1
+
+NODE_LINUX="${FMW_LINUX_NODE:-$HOME/.local/nodejs/bin/node}"
+PI_CLI="$HOME/.local/npm-global/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+
+if [ ! -x "$NODE_LINUX" ] || [ ! -f "$PI_CLI" ]; then
+  echo "pi shim: Linux Pi not found ($PI_CLI) — install with: npm install -g @earendil-works/pi-coding-agent" >&2
+  exit 127
+fi
+
+exec "$NODE_LINUX" "$PI_CLI" "$@"

@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# bin/shims/node — node dispatcher for firstmate-win (fmw)
+#
+# By default it runs the NATIVE Linux Node. In WSL, `node` must be Linux
+# (process.platform=linux, process.execPath outside /mnt/).
+#
+# The node.exe (Windows) bridge remains available EXPLICITLY with
+# FMW_USE_WINDOWS_NODE=1, for Windows npm harnesses invoked from WSL
+# (codex/opencode/cline/copilot). node.exe does not understand WSL paths:
+# existing absolute WSL args are converted with wslpath -w:
+#   /mnt/c/...      -> C:\...            (drvfs)
+#   /home/leo/...   -> \\wsl.localhost\Ubuntu\home\leo\...  (9p)
+# Without this, pi receives "Cannot find module 'C:\mnt\c\...'" (path
+# interpreted as relative under the cwd). cwd: when the process runs under
+# /mnt/<drive>/, WSL interop exposes it as <drive>:\... (native Windows work).
+set -uo pipefail
+
+if [ "${FMW_USE_WINDOWS_NODE:-0}" = "1" ]; then
+  # --- explicit bridge to node.exe (Windows) ---
+  NODE_EXE="${NODE_WINDOWS_EXE:-/mnt/c/Program Files/nodejs/node.exe}"
+  if [ ! -x "$NODE_EXE" ]; then
+    echo "node shim: node.exe not found at $NODE_EXE (FMW_USE_WINDOWS_NODE=1 but no node.exe; set NODE_WINDOWS_EXE)" >&2
+    exit 127
+  fi
+
+  args=()
+  win=""
+  for a in "$@"; do
+    case "$a" in
+      /*)
+        if [ -e "$a" ] && command -v wslpath >/dev/null 2>&1; then
+          win="$(wslpath -w "$a" 2>/dev/null)" && { args+=("$win"); continue; }
+        fi
+        args+=("$a")
+        ;;
+      *) args+=("$a") ;;
+    esac
+  done
+
+  exec "$NODE_EXE" "${args[@]}"
+fi
+
+# --- default: native Linux Node ---
+# FMW_USE_LINUX_NODE=1 (legacy, exported by bin/shims/pi) is still accepted:
+# it was the explicit Linux mode; it is now the default. FMW_LINUX_NODE
+# allows overriding the runtime path.
+NODE_LINUX="${FMW_LINUX_NODE:-$HOME/.local/nodejs/bin/node}"
+if [ ! -x "$NODE_LINUX" ]; then
+  echo "node shim: Linux Node not found at $NODE_LINUX (set FMW_LINUX_NODE or install the runtime at ~/.local/nodejs)" >&2
+  exit 127
+fi
+exec "$NODE_LINUX" "$@"

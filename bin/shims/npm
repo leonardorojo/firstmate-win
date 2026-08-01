@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# bin/shims/npm — native Linux npm for firstmate-win (fmw)
+#
+# On Node >= 24 the bin/npm binary of the Linux runtime is a Node script with
+# shebang "#!/usr/bin/env node". Running it via PATH would make `env` resolve
+# `node` to the bridge ~/.local/bin/node (bin/shims/node) and npm would run
+# as a Windows process (node.exe, prefix C:\Program Files\nodejs).
+# This shim runs the Linux node directly, bypassing PATH.
+set -uo pipefail
+
+NODE_LINUX="${FMW_LINUX_NODE:-$HOME/.local/nodejs/bin/node}"
+NPM_CLI="$HOME/.local/nodejs/lib/node_modules/npm/bin/npm-cli.js"
+
+if [ ! -x "$NODE_LINUX" ] || [ ! -f "$NPM_CLI" ]; then
+  echo "npm shim: Linux Node runtime not found ($NODE_LINUX / $NPM_CLI)" >&2
+  exit 127
+fi
+
+exec "$NODE_LINUX" "$NPM_CLI" "$@"

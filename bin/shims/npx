@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# bin/shims/npx — native Linux npx for firstmate-win (fmw)
+#
+# Same mechanism as bin/shims/npm: runs the Linux node directly so the
+# "#!/usr/bin/env node" shebang of npx-cli.js does not fall into the bridge
+# ~/.local/bin/node (Windows node.exe).
+set -uo pipefail
+
+NODE_LINUX="${FMW_LINUX_NODE:-$HOME/.local/nodejs/bin/node}"
+NPX_CLI="$HOME/.local/nodejs/lib/node_modules/npm/bin/npx-cli.js"
+
+if [ ! -x "$NODE_LINUX" ] || [ ! -f "$NPX_CLI" ]; then
+  echo "npx shim: Linux Node runtime not found ($NODE_LINUX / $NPX_CLI)" >&2
+  exit 127
+fi
+
+exec "$NODE_LINUX" "$NPX_CLI" "$@"

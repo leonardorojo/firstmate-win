@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# firstmate-win — .gitignore
+# ---------------------------------------------------------------------------
+# Only source, tests and documentation are published. All runtime artifacts,
+# local machine configuration and diagnostics are excluded by design.
+
+# Runtime state (task metadata, locks, archive — created by fmw at runtime)
+state/
+
+# Diagnostics / scratch (never committed)
+tmp/
+*.log
+*.out
+
+# Local machine configuration — commit the *.example files instead
+config/projects/*.conf
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

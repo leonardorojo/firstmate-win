@@ -1,0 +1,7 @@
+PROJECT_NAME='CivilPlan'
+PROJECT_WINDOWS_PATH='C:\CivilPlan'
+PROJECT_WSL_PATH='/mnt/c/CivilPlan'
+PROJECT_WORKTREE_WINDOWS_ROOT='C:\FirstmateWorktrees\CivilPlan'
+PROJECT_WORKTREE_WSL_ROOT='/mnt/c/FirstmateWorktrees/CivilPlan'
+PROJECT_PROFILE='civilplan'
+REGISTERED_AT='<ISO-8601-UTC>'

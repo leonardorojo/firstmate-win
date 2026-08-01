@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# fmw — firstmate-win: Firstmate <-> Windows repos compatibility layer.
+# Runtime: WSL. Repositories and worktrees ALWAYS live on Windows (/mnt).
+# Usage: fmw help
+
+FMW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
+for _lib in common config paths safety projects worktrees windows runtime firstmate reconcile; do
+  . "$FMW_LIB_DIR/$_lib.sh"
+done
+unset _lib
+
+fmw_is_inside_wsl || { echo "fmw: ERROR: must run inside WSL (wslpath missing)" >&2; exit 1; }
+fmw_ensure_dirs
+
+fmw_help() {
+  cat <<'EOF'
+fmw — firstmate-win: Firstmate orchestrates in WSL; repos and worktrees on Windows.
+
+USAGE
+  fmw version                      wrapper version
+  fmw help                         this help
+  fmw doctor                       environment diagnostics (WSL/Windows)
+
+  fmw path to-wsl <p>              Windows path -> WSL (wslpath -u)
+  fmw path to-windows <p>          WSL path -> Windows (wslpath -w)
+  fmw path canonical <p>           canonicalize (realpath -m, lowercase drive)
+  fmw path check <p>               validate it is under /mnt/<drive>/
+
+  fmw project add --name N --windows-path P --worktree-root R [--profile P]
+  fmw project list
+  fmw project show <name>
+  fmw project validate <name>
+
+  fmw task prepare --project P --id T [--branch B]
+  fmw task show <id>
+  fmw task list
+  fmw task status <id>
+  fmw task brief <id> [--scout]         brief via fm-brief.sh (Firstmate)
+  fmw task spawn <id> [--scout] [--harness X] [--model M] [--effort E]
+                                         hands the worktree to fm-spawn.sh (shim)
+  fmw task send <id> <message...>       steering via fm-send.sh
+  fmw task open <id> --explorer|--vscode|--visual-studio
+  fmw task teardown <id> [--force]     fail-closed; keeps the branch
+
+  fmw exec powershell <script...>  native PowerShell (exact exit code)
+  fmw exec cmd <command...>        native CMD (exact exit code)
+  fmw build [--task <id>]          Windows build via profile (from worktree or --task)
+  fmw test  [--task <id>]          Windows tests via profile
+  fmw open <path> --target T       open path in explorer|vscode|visual-studio
+EOF
+}
+
+# --- doctor ---
+fmw_doctor() {
+  local ok=1
+  local label rc
+  check() { label="$1"; shift; if "$@" >/dev/null 2>&1; then echo "  [PASS] $label"; else echo "  [FAIL] $label"; ok=0; fi; }
+
+  echo "fmw doctor ($FMW_VERSION) — WSL runtime"
+  echo "  FMW_HOME=$FMW_HOME"
+  echo "  Firstmate=$FMW_FIRSTMATE_HOME"
+  echo "  state=$FMW_STATE"
+  check "wslpath (WSL runtime)"      command -v wslpath
+  check "git"                        git --version
+  check "tmux"                       tmux -V
+  check "flock (locking)"            command -v flock
+  check "/mnt/c accessible"           test -d /mnt/c
+  check "PowerShell interop"         powershell.exe -NoProfile -Command '$true'
+  check "CMD interop"                cmd.exe /c ver
+  check "Firstmate home"             test -d "$FMW_FIRSTMATE_HOME/bin"
+  check "fm-spawn.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-spawn.sh"
+  check "fm-brief.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-brief.sh"
+  check "fm-teardown.sh"             test -f "$FMW_FIRSTMATE_HOME/bin/fm-teardown.sh"
+  check "state directories"          test -d "$FMW_TASKS_DIR"
+  # runtime: Node and Pi must be native Linux processes in WSL
+  if out="$(fmw_runtime_node_linux)"; then
+    echo "  [PASS] Linux Node: $out"
+  else
+    echo "  [FAIL] Linux Node: $out"
+    ok=0
+  fi
+  if out="$(fmw_runtime_pi_linux)"; then
+    echo "  [PASS] Linux Pi: $out"
+  else
+    echo "  [FAIL] Linux Pi: $out"
+    ok=0
+  fi
+  echo "  [INFO] node on PATH: $(command -v node 2>/dev/null || echo missing)"
+  echo "  [INFO] pi on PATH:   $(command -v pi 2>/dev/null || echo missing)"
+  if command -v treehouse >/dev/null 2>&1; then
+    echo "  [INFO] treehouse installed: $(command -v treehouse) (the fmw shim will intercept it only for fmw tasks)"
+  else
+    echo "  [INFO] treehouse NOT installed (not needed for the fmw flow; the shim delegates if it appears)"
+  fi
+  [ "$ok" = 1 ] && echo "  -> environment OK" || echo "  -> environment has failures"
+  return $((ok ? 0 : 1))
+}
+
+# --- path ---
+fmw_cli_path() {
+  local sub="${1:-}" p
+  [ -n "$sub" ] || fmw_die "usage: fmw path <to-wsl|to-windows|canonical|check> <path>"
+  shift || true
+  p="${1:-}"
+  [ -n "$p" ] || fmw_die "missing path"
+  case "$sub" in
+    to-wsl)     fmw_path_to_wsl "$p" ;;
+    to-windows) fmw_path_to_windows "$p" ;;
+    canonical)  fmw_path_canonical "$p" ;;
+    check)
+      if fmw_path_is_windows_mounted "$p"; then
+        echo "OK: $(fmw_path_canonical "$p") (under /mnt/<drive>/)"
+      else
+        fmw_die "does not resolve under /mnt/<drive>/: $(fmw_path_canonical "$p")"
+      fi ;;
+    *) fmw_die "unknown subcommand: $sub";;
+  esac
+}
+
+# --- project ---
+fmw_cli_project() {
+  local sub="${1:-}"
+  [ -n "$sub" ] || fmw_die "usage: fmw project <add|list|show|validate>"
+  shift || true
+  case "$sub" in
+    add)      fmw_project_add "$@" ;;
+    list)     fmw_project_list ;;
+    show)     [ $# -ge 1 ] || fmw_die "usage: fmw project show <name>"; fmw_project_show "$1" ;;
+    validate) [ $# -ge 1 ] || fmw_die "usage: fmw project validate <name>"; fmw_project_validate "$1" ;;
+    *) fmw_die "unknown subcommand: $sub";;
+  esac
+}
+
+# --- task ---
+fmw_cli_task() {
+  local sub="${1:-}"
+  [ -n "$sub" ] || fmw_die "usage: fmw task <prepare|show|list|status|open|teardown>"
+  shift || true
+  case "$sub" in
+    prepare)  fmw_task_prepare "$@" ;;
+    show)     [ $# -ge 1 ] || fmw_die "usage: fmw task show <id>"; fmw_task_show "$1" ;;
+    list)     fmw_task_list ;;
+    status)   [ $# -ge 1 ] || fmw_die "usage: fmw task status <id>"; fmw_task_status "$1" ;;
+    teardown) fmw_task_teardown "$@" ;;
+    open)     fmw_cli_task_open "$@" ;;
+    brief)    fmw_task_brief "$@" ;;
+    spawn)    fmw_task_spawn "$@" ;;
+    send)     fmw_task_send "$@" ;;
+    *) fmw_die "unknown subcommand: $sub";;
+  esac
+}
+
+# fmw task open <id> --explorer|--vscode|--visual-studio
+fmw_cli_task_open() {
+  local id="${1:-}" target=""
+  [ -n "$id" ] || fmw_die "usage: fmw task open <id> --explorer|--vscode|--visual-studio"
+  shift || true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --explorer)       target="explorer"; shift ;;
+      --vscode)         target="vscode"; shift ;;
+      --visual-studio)  target="visual-studio"; shift ;;
+      *) fmw_die "unknown argument: $1";;
+    esac
+  done
+  [ -n "$target" ] || fmw_die "missing target: --explorer|--vscode|--visual-studio"
+  fmw_task_load "$id" || return 1
+  [ -d "$WORKTREE_WSL_PATH" ] || fmw_die "worktree does not exist: $WORKTREE_WSL_PATH"
+  if [ "$target" = "visual-studio" ]; then
+    # open the project solution in VS (via profile) instead of the directory
+    fmw_profile_load "$PROJECT_NAME" "$id" >/dev/null 2>&1 && { fmw_profile_open visual-studio; return $?; }
+  fi
+  fmw_open "$WORKTREE_WSL_PATH" "$target"
+}
+
+# --- exec ---
+fmw_cli_exec() {
+  local sub="${1:-}"
+  [ -n "$sub" ] || fmw_die "usage: fmw exec <powershell|cmd> <command...>"
+  shift || true
+  case "$sub" in
+    powershell) fmw_exec_powershell "$@" ;;
+    cmd)        fmw_exec_cmd "$@" ;;
+    *) fmw_die "unknown subcommand: $sub";;
+  esac
+}
+
+# --- build/test/open ---
+fmw_cli_build() { fmw_build "$@"; }
+fmw_cli_test()  { fmw_test "$@"; }
+fmw_cli_open() {
+  local path="" target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --target) target="$2"; shift 2 ;;
+      -*) fmw_die "unknown argument: $1";;
+      *) [ -z "$path" ] && path="$1" || fmw_die "too many arguments"; shift ;;
+    esac
+  done
+  [ -n "$path" ] && [ -n "$target" ] || fmw_die "usage: fmw open <path> --target <explorer|vscode|visual-studio>"
+  fmw_open "$path" "$target"
+}
+
+# --- dispatch ---
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift || true
+case "$cmd" in
+  version)          echo "fmw $FMW_VERSION" ;;
+  help|--help|-h)   fmw_help ;;
+  doctor)           fmw_doctor ;;
+  path)             fmw_cli_path "$@" ;;
+  project)          fmw_cli_project "$@" ;;
+  task)             fmw_cli_task "$@" ;;
+  exec)             fmw_cli_exec "$@" ;;
+  build)            fmw_cli_build "$@" ;;
+  test)             fmw_cli_test "$@" ;;
+  open)             fmw_cli_open "$@" ;;
+  *) fmw_die "unknown command: $cmd (fmw help)";;
+esac
