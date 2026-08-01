@@ -62,8 +62,11 @@ bash ~/firstmate/bin/fm-watch-arm.sh   # standalone tracked; beacon
 
 ## Parallel scouts (multi-task)
 
-Two or more concurrent scouts with full isolation. Sequence validated
-(2026-07-31, `parallel-scout-cloud` + `parallel-scout-build`):
+Two or more concurrent scouts with full isolation — on the same project or on
+**different registered projects** (e.g. one task on IngenieumApp and another
+on CivilPlan, simultaneously). Sequence validated with
+`parallel-scout-cloud` + `parallel-scout-build` (same project) and
+`mrepo-scout-ia` + `mrepo-scout-cp` (two projects):
 
 ```bash
 # 0) watcher BEFORE the spawns (fresh beacon) + clean queue

@@ -65,5 +65,16 @@ fmw_conf_write_atomic() {
   return 0
 }
 
+# fmw_conf_value <file> <KEY> — read a single key WITHOUT mutating the shell.
+#   Minimal read-only parser (grep + cut + strip quotes). Unlike
+#   fmw_conf_load it never sets shell variables, so it is safe to call in
+#   loops over several configs (fmw_conf_load in a loop would leave the
+#   shell variables of the LAST config behind — a cross-project leak).
+fmw_conf_value() {
+  local file="$1" key="$2"
+  [ -f "$file" ] || return 1
+  grep -E "^${key}=" "$file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d "'"
+}
+
 # fmw_conf_quote <value> — quote a value for .conf (single quotes)
 fmw_conf_quote() { printf "'%s'" "$1"; }

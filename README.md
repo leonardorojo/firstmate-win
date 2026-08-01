@@ -292,12 +292,14 @@ archived (`state/archive/`) on teardown, never destroyed.
 ## Parallel execution
 
 Multiple tasks run concurrently with full per-task isolation — one tmux
-window, one agent process, one worktree, one metadata set per task. The only
-shared components by design are the tmux global PATH (idempotent shim setup)
-and the Firstmate watcher (one process supervising all tasks). Two concurrent
-read-only scouts were demonstrated end-to-end; see
+window, one agent process, one worktree, one metadata set per task — **across
+multiple registered projects**. Two concurrent read-only scouts on the same
+repository, and two concurrent scouts on two different repositories
+(IngenieumApp + CivilPlan), were demonstrated end-to-end. The only shared
+components by design are the tmux global PATH (idempotent shim setup) and the
+Firstmate watcher (one process supervising all tasks). See
 [docs/architecture.md](docs/architecture.md#parallelism-and-multi-task-isolation)
-for the isolation table and the validated workflow.
+for the isolation table and the validated workflows.
 
 ## Safety model
 
@@ -379,6 +381,7 @@ Maturity labels used in this repository:
 | Windows repositories + worktrees | `lib/worktrees.sh`, worktree-safety tests |
 | Safe teardown (fail-closed, branch kept) | `lib/worktrees.sh`, worktree-safety tests |
 | Multi-task isolation (per-task metadata, locks, windows) | parallel-scout trial, two concurrent tasks |
+| Multi-repository orchestration (concurrent tasks across different registered projects) | two concurrent scouts on IngenieumApp + CivilPlan |
 | Terminal-state reconciliation (Design C) | `lib/reconcile.sh`, reconcile tests |
 | Completion gates (done/blocked/failed) | `lib/reconcile.sh`, reconcile tests |
 | Failed-spawn recovery (meta published, rc≠0 downstream) | `lib/firstmate.sh`, fase6-recovery tests |
@@ -437,6 +440,9 @@ Demonstrated end-to-end:
 
 - `prepare` → `brief` → `spawn` → `send` → `status` → `teardown` (single task)
 - Parallel scouts (two concurrent read-only tasks with full isolation)
+- Parallel scouts on two different projects (IngenieumApp + CivilPlan,
+  full isolation — each task in its own worktree, branch, metadata and
+  report)
 - Watcher supervision of multiple tasks (benign absorption + consolidated
   wake)
 - Completion gate + state reconciliation (`spawned → done`, idempotent)
