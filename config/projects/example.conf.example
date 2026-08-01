@@ -1,0 +1,15 @@
+# Example project registry entry for firstmate-win (fmw).
+#
+# Copy this file to config/projects/<name>.conf and adjust the four paths.
+# The two path pairs (Windows and WSL) are stored so the wrapper never
+# converts paths by hand. The profile referenced below must exist as
+# profiles/<profile>.sh (see "Supported build profiles" in the README).
+#
+# Note: real .conf files are git-ignored; only this example is committed.
+PROJECT_NAME='MyApp'
+PROJECT_WINDOWS_PATH='C:\MyApp'
+PROJECT_WSL_PATH='/mnt/c/MyApp'
+PROJECT_WORKTREE_WINDOWS_ROOT='C:\FirstmateWorktrees\MyApp'
+PROJECT_WORKTREE_WSL_ROOT='/mnt/c/FirstmateWorktrees/MyApp'
+PROJECT_PROFILE='myapp'
+REGISTERED_AT='2026-01-01T00:00:00Z'

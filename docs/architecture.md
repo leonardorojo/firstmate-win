@@ -113,7 +113,7 @@ Design points that make parallelism possible without upstream changes:
   persists ONLY the indicated task; teardown eligibility is evaluated per task
   and never touches other worktrees/windows.
 
-### Observed limits (validated 2026-07-31)
+### Observed limits
 
 1. **The watcher is not a permanent daemon**: every cycle ends on the first
    actionable wake (by design: notify the captain). With tasks in flight it
@@ -133,6 +133,8 @@ Design points that make parallelism possible without upstream changes:
    Teardown closes the window and terminates it.
 5. **`no registry at data/projects.md` notice**: benign; the no-mistakes mode
    does not apply to scouts (kind=scout → report, no merge).
+
+These limits were observed during the two-concurrent-scouts trial.
 
 ### Recommendations (routine parallelism)
 
@@ -204,24 +206,7 @@ requires a prior controlled close; `busy`/missing/unreadable ⇒ not eligible).
 - `git worktree add` from WSL over a Windows repo: ~11 s.
 - Windows profiles run native MSBuild (never Linux `dotnet`).
 
-## Recorded decisions
+---
 
-1. **Independent wrapper** (not a fork): upstream updates without rework.
-2. **`treehouse` shim** instead of patching upstream: the alternative options
-   (existing API, composition, env vars, point wrapper) were rejected with
-   evidence; the shim is delegating and never reimplements the pool.
-3. **fmw owns the teardown** of its tasks; the shim translates
-   `treehouse return` so `fm-teardown.sh` also works unchanged.
-4. **`fmw task send` exports `FM_HOME`** when invoking `fm-send.sh`: the
-   upstream script is fail-closed and rejected steering without that variable
-   (real wrapper bug, fixed with a regression test).
-5. **Linux runtime by default in the shims**: `node`/`npm`/`npx`/`pi`/
-   `tasks-axi` resolve under the Linux home (never `/mnt/`); the `node.exe`
-   bridge requires `FMW_USE_WINDOWS_NODE=1`. Without tasks-axi in the pane,
-   the gate closes in `blocked:`.
-6. **Reconciliation = Design C with `fm-crew-state.sh` as the single source**:
-   only reliable terminals (`done|blocked|failed`) are persisted; transients
-   are computed dynamically; fail-closed on missing/failed source;
-   `.turn-ended`/`report.md` are never a source. A (transient churn in the
-   lifecycle conf) and B (wrapper blind to the final state; no teardown gate)
-   were rejected.
+See [docs/design-decisions.md](design-decisions.md) for the rationale behind
+the current architecture (shim approach, Design C, Linux runtime policy).

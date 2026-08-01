@@ -1,14 +1,17 @@
 # firstmate-win (fmw)
 
-**Firstmate orchestration for Windows repositories — a compatibility wrapper
-around [Firstmate](https://github.com/kunchenguid/firstmate) that runs
-Firstmate agents in WSL while keeping repositories and worktrees on Windows.**
+**A compatibility wrapper that lets [Firstmate](https://github.com/kunchenguid/firstmate)
+orchestrate Git repositories and worktrees located on Windows, while the
+orchestration runtime runs inside WSL.**
 
-`fmw` is a small, fail-closed CLI that makes Firstmate work with Git
-repositories that live on a Windows drive (`C:\...`), where the Git client
-that owns the worktree lifecycle runs inside WSL. It does **not** reimplement
-Firstmate: it delegates orchestration to the official Firstmate scripts and
-adds the Windows/WSL integration layer around them.
+`fmw` is a small, fail-closed CLI. It does **not** reimplement Firstmate: it
+delegates orchestration to the official Firstmate scripts and adds the
+Windows/WSL integration layer around them.
+
+> **Status: early public release.** No tagged releases yet. Everything
+> documented as *Validated* has been demonstrated end-to-end on the author's
+> environment (Windows 10, WSL2 Ubuntu) and is covered by the test suite.
+> Nothing here should be considered production-ready.
 
 ---
 
@@ -20,32 +23,48 @@ development machines — where the canonical repository checkout lives on
 `C:\` and real builds run with MSBuild/Visual Studio — that assumption does
 not hold.
 
-`firstmate-win` solves exactly that problem:
+`firstmate-win` addresses this by keeping a strict split:
 
 - **Repositories stay on Windows.** The main checkout and every task worktree
   live under `C:\FirstmateWorktrees\<project>\<task>`.
-- **The runtime stays in WSL.** Firstmate, Node, Pi and the agent harnesses
-  run as native Linux processes.
-- **Git lifecycle is owned by WSL git.** Worktrees are created, validated and
-  removed through `git worktree` executed inside WSL — the only reliable owner
-  of worktree metadata.
+- **The runtime stays in WSL.** Firstmate, Node, Pi and the agent harness run
+  as native Linux processes.
+- **WSL git owns the worktree lifecycle.** Worktrees are created, validated
+  and removed through `git worktree` executed inside WSL.
 - **Builds stay on Windows.** The `fmw build` / `fmw test` commands dispatch
   to native Windows tools (MSBuild, dotnet.exe, vstest) via WSL interop.
 
 ## Motivation
 
-Windows-first .NET shops (Tekla, Revit, WPF, legacy `packages.config`)
-cannot move their canonical repositories into WSL: builds, tooling and
-signing require the Windows toolchain, and `git` under `/mnt/c` is slow.
-Firstmate's native flow assumes a Linux repo. `fmw` is the bridge: agents
-work on the Windows checkout through WSL paths, and the authoritative build
-evidence always comes from the Windows toolchain.
+Windows-first .NET codebases (WPF, legacy `packages.config`, Tekla/Revit
+add-ins) cannot move their canonical repositories into WSL: builds, tooling
+and signing require the Windows toolchain, and `git` under `/mnt/c` is slow.
+Firstmate's native flow assumes a Linux repository. `fmw` bridges the two:
+agents work on the Windows checkout through WSL paths, and the authoritative
+build evidence always comes from the Windows toolchain.
+
+## Relationship with Firstmate
+
+This project is **independent** of Firstmate. To be explicit:
+
+- `firstmate-win` is an independent compatibility wrapper, not a fork of
+  Firstmate and not affiliated with the Firstmate project.
+- **Firstmate must be installed separately.** This repository does not
+  redistribute Firstmate or any of its dependencies.
+- **This repository does not modify Firstmate upstream.** Integration happens
+  through the official scripts (`fm-brief.sh`, `fm-spawn.sh`, `fm-send.sh`,
+  `fm-crew-state.sh`) and a delegating `treehouse` shim; the upstream tree is
+  left untouched.
+- **All credit for Firstmate belongs to its original author(s).**
+  See [kunchenguid/firstmate](https://github.com/kunchenguid/firstmate).
+- This project exists to improve Windows interoperability for Firstmate
+  users; no endorsement or shared ownership is implied.
 
 ## Architecture
 
 ```text
 WSL
-├── ~/firstmate            Firstmate upstream (INTACT, installable)
+├── ~/firstmate            Firstmate upstream (installed separately, INTACT)
 ├── ~/firstmate-win        fmw (this repository)
 │   ├── bin/fmw            CLI
 │   ├── bin/shims/         treehouse (delegating), node/npm/npx/pi
@@ -55,7 +74,7 @@ WSL
 │   ├── profiles/          per-project build/test/open adapters
 │   ├── config/projects/   *.conf — project registry (see *.example)
 │   └── state/{tasks,archive,locks}/   runtime state (never committed)
-└── tmux + git + agent harnesses (pi, …)
+└── tmux + git + agent harness (pi)
 
 Windows
 ├── C:\<repo>              main checkout (never touched by fmw)
@@ -76,24 +95,11 @@ Key components:
 - **`profiles/`** — per-project adapters exposing
   `fmw_profile_validate / build / test / open` for the Windows toolchain.
 - **`config/projects/*.conf`** — the project registry (Windows↔WSL path
-  pairs per repository). Copy `*.conf.example` and adjust.
-
-## Relationship with Firstmate
-
-- **This project is independent.** It is not Firstmate and it is not
-  affiliated with the Firstmate project.
-- **Firstmate must be installed separately.** `fmw` does not redistribute
-  Firstmate or any of its dependencies.
-- **Firstmate authorship remains entirely with its original author(s).**
-  See the [upstream repository](https://github.com/kunchenguid/firstmate).
-- `fmw` invokes the official Firstmate scripts (`fm-brief.sh`, `fm-spawn.sh`,
-  `fm-send.sh`, `fm-crew-state.sh`) unchanged. This repository only adds the
-  Windows/WSL compatibility and orchestration layer around them.
-- No endorsement, affiliation or shared ownership is implied.
+  pairs per repository). See `config/projects/example.conf.example`.
 
 ## Requirements
 
-Validated environment (see [Compatibility](#compatibility)):
+Validated environment (see [Supported platforms](#supported-platforms)):
 
 - Windows 10/11 with WSL2 (Ubuntu recommended)
 - WSL: `bash`, `git`, `tmux`, `flock`, `wslpath`, `realpath`
@@ -125,21 +131,41 @@ alias in `~/.bashrc` if desired:
 alias fmw='bash /mnt/c/firstmate-win/bin/fmw'
 ```
 
-Install Firstmate separately (upstream instructions), then register your
-repositories:
+Install Firstmate separately (upstream instructions) before registering
+repositories.
+
+## Quick Start
+
+After installing Firstmate in WSL and cloning this repository:
 
 ```bash
+# 1. register your repository (creates config/projects/<name>.conf)
 fmw project add --name MyApp \
   --windows-path "C:\MyApp" \
   --worktree-root "C:\FirstmateWorktrees\MyApp" \
   --profile myapp
+
+# 2. run a read-only scout task
+fmw task prepare --project MyApp --id my-first-scout
+fmw task brief my-first-scout --scout
+fmw task spawn my-first-scout --scout --harness pi
+
+# 3. wait for the agent to finish, then check the state
+fmw task status my-first-scout       # STATE -> done when finished
+
+# 4. remove the task worktree (the branch is kept)
+fmw task teardown my-first-scout
 ```
+
+See [docs/runbook.md](docs/runbook.md) for the full lifecycle, the completion
+gate setup (`tasks-axi`) and parallel execution.
 
 ## Configuration
 
 ### Project registry (`config/projects/*.conf`)
 
-One `.conf` per registered repository. Copy the examples and edit:
+One `.conf` per registered repository. Copy
+`config/projects/example.conf.example` and edit:
 
 ```conf
 PROJECT_NAME='MyApp'
@@ -153,7 +179,7 @@ REGISTERED_AT='2026-01-01T00:00:00Z'
 
 Config files are parsed against a strict allowlist; nothing is `source`d or
 `eval`ed. Machine-specific `.conf` files are git-ignored — only the
-`*.example` files are committed.
+`*.example` file is committed.
 
 ### Environment overrides
 
@@ -165,7 +191,7 @@ Config files are parsed against a strict allowlist; nothing is `source`d or
 | `FMW_SKIP_INTEROP_CHECK` | unset | skip PowerShell interop checks (tests) |
 | `FMW_SKIP_RUNTIME_CHECK` | unset | skip pi Linux runtime checks (tests) |
 
-## Runtime
+## Runtime architecture
 
 The wrapper enforces a native Linux runtime for the agent stack:
 
@@ -179,7 +205,7 @@ The wrapper enforces a native Linux runtime for the agent stack:
 
 `fmw doctor` verifies all of this and prints a per-check PASS/FAIL report.
 
-## Windows integration
+### Windows integration
 
 - **Interop**: `fmw exec powershell <script>` and `fmw exec cmd <command>`
   run native Windows processes from WSL and propagate their exact exit code.
@@ -190,7 +216,7 @@ The wrapper enforces a native Linux runtime for the agent stack:
   `/mnt/<drive>/`; native WSL paths (`/home`, `/tmp`, `/var`, `/root`) are
   rejected for worktrees.
 
-## WSL integration
+### WSL integration
 
 - Worktree lifecycle is executed by WSL `git` (`git worktree add/remove/
   prune`). Windows git is never used for lifecycle operations.
@@ -199,7 +225,15 @@ The wrapper enforces a native Linux runtime for the agent stack:
 - The Firstmate watcher (`fm-watch-arm.sh` / `fm-watch.sh`) supervises all
   tasks of the home from a single process.
 
-## Build profiles
+## Supported harnesses
+
+- **Validated**: `pi` (native Linux, via the fmw shims). Every capability in
+  this README was validated with the `pi` harness.
+- **Not validated / not supported**: Claude, Codex, OpenCode. They are not
+  part of the supported flow, even if the executables happen to exist on a
+  machine.
+
+## Supported build profiles
 
 A profile is a per-project adapter exposing:
 
@@ -210,11 +244,16 @@ fmw_profile_test              # Windows test run
 fmw_profile_open <target>     # explorer | vscode | visual-studio
 ```
 
-The repository ships two reference profiles: `profiles/ingenieumapp.sh` (a
-real Windows/.NET flow: `nuget restore` + `dotnet build` + `vstest`, with
-every tool overridable via `INGENIEUMAPP_*` environment variables) and
-`profiles/civilplan.sh` (a fail-loud stub). Write your own per project — the
-contract is three functions plus `validate`.
+The repository ships two reference profiles:
+
+- `profiles/ingenieumapp.sh` — a real Windows/.NET flow (`nuget restore` +
+  `dotnet build` + `vstest`), with every tool overridable via
+  `INGENIEUMAPP_*` environment variables. The profile contract is validated
+  by the test suite; the exact build flow matches the repository's own README.
+- `profiles/civilplan.sh` — a fail-loud stub.
+
+Profiles for other projects are **experimental** until the contract is
+exercised by more repositories.
 
 ## Task lifecycle
 
@@ -243,9 +282,10 @@ archived (`state/archive/`) on teardown, never destroyed.
 Multiple tasks run concurrently with full per-task isolation — one tmux
 window, one agent process, one worktree, one metadata set per task. The only
 shared components by design are the tmux global PATH (idempotent shim setup)
-and the Firstmate watcher (one process supervising all tasks). See
-[`docs/architecture.md`](docs/architecture.md#parallelism-and-multi-task-isolation)
-for the isolation table and the validated parallel-scout workflow.
+and the Firstmate watcher (one process supervising all tasks). Two concurrent
+read-only scouts were demonstrated end-to-end; see
+[docs/architecture.md](docs/architecture.md#parallelism-and-multi-task-isolation)
+for the isolation table and the validated workflow.
 
 ## Safety model
 
@@ -260,9 +300,9 @@ for the isolation table and the validated parallel-scout workflow.
 - **Allowlist config parsing**: `.conf` files are parsed line-by-line against
   a strict key allowlist; invalid keys abort.
 - **Per-task locks**: `flock` by task id around every mutable operation.
-- **Terminal-state reconciliation** (Design C): only reliable terminal states
-  (`done`, `blocked`, `failed`) confirmed by the authoritative Firstmate
-  source are persisted; transient states are never written; `.turn-ended` and
+- **Terminal-state reconciliation**: only reliable terminal states (`done`,
+  `blocked`, `failed`) confirmed by the authoritative Firstmate source are
+  persisted; transient states are never written; `.turn-ended` and
   `report.md` alone never mark a task done.
 
 ## Troubleshooting
@@ -275,7 +315,7 @@ for the isolation table and the validated parallel-scout workflow.
 | `the worktree has local changes` | dirty worktree | review; `--force` only with authorization |
 | `Pi resolves to a Windows binary` | Windows npm pi shim on PATH | use the fmw shim + Linux Node (`npm install -g @earendil-works/pi-coding-agent`) |
 | scout closes in `blocked:` | completion gate without `tasks-axi` in the pane | install `tasks-axi` (Linux) and re-steer with `fmw task send` |
-| `FM_HOME is not set` (fmw task send) | stale wrapper | use the current version; the fix exports `FM_HOME` |
+| `FM_HOME is not set` (fmw task send) | old wrapper version | use the current fmw (it exports `FM_HOME` when calling `fm-send.sh`) |
 | slow git under `/mnt/c` | drvfs | expected; measure before optimizing |
 
 Full runbook: [`docs/runbook.md`](docs/runbook.md).
@@ -306,35 +346,49 @@ detection/rejection, the IngenieumApp build profile contract and the
 terminal-state reconciliation matrix. The upstream Firstmate scripts are
 simulated with fakes; their real semantics are audited separately.
 
-## Currently supported
+## Current capabilities
 
-Everything below is implemented and exercised by the test suite and/or
-demonstrated end-to-end. Maturity labels: **Stable** (production-tested),
-**Preview** (working, still maturing), **Experimental** (proof-of-concept).
+Maturity labels used in this repository:
 
-| Capability | Maturity | Evidence |
-|------------|----------|----------|
-| WSL runtime (CLI requires WSL) | Stable | `bin/fmw` guard, `fmw doctor` |
-| Linux Node runtime enforcement | Stable | `lib/runtime.sh`, shims, runtime tests |
-| Linux Pi runtime enforcement | Stable | `lib/runtime.sh`, runtime tests |
-| tasks-axi integration (completion gate) | Stable | validated with tasks-axi 0.2.4 |
-| Windows repositories + worktrees | Stable | `lib/worktrees.sh`, worktree-safety tests |
-| Parallel agents (N concurrent tasks) | Stable | Sprint 4 parallel-scout demo (2 tasks) |
-| Watcher integration (single watcher, N tasks) | Stable | `fm-watch-arm.sh` cycles |
-| Completion gates (done/blocked/failed) | Stable | `lib/reconcile.sh`, reconcile tests |
-| State reconciliation (Design C) | Stable | `lib/reconcile.sh`, reconcile tests |
-| Safe teardown (fail-closed, branch kept) | Stable | `lib/worktrees.sh`, worktree-safety tests |
-| Multi-agent isolation | Stable | per-task metadata, locks, windows |
-| Windows build profiles | Preview | `profiles/ingenieumapp.sh` (contract-validated) |
-| Test suite (220 assertions across 8 suites) | Stable | `tests/run-all.sh` |
+- **Validated** — demonstrated end-to-end (on the author's Windows 10 +
+  WSL2 Ubuntu environment) and/or covered by the test suite.
+- **Preview** — working, with a narrower validation scope; expect changes.
+- **Experimental** — proof-of-concept; may change or disappear.
+- **Not supported** — explicitly out of scope.
 
-## Not supported
+### Validated
 
-Explicitly out of scope today:
+| Capability | Evidence |
+|------------|----------|
+| WSL runtime (CLI requires WSL) | `bin/fmw` guard, `fmw doctor` |
+| Linux Node runtime enforcement | `lib/runtime.sh`, shims, runtime tests |
+| Linux Pi runtime enforcement | `lib/runtime.sh`, runtime tests |
+| tasks-axi integration (completion gate) | validated with tasks-axi 0.2.4 |
+| Windows repositories + worktrees | `lib/worktrees.sh`, worktree-safety tests |
+| Safe teardown (fail-closed, branch kept) | `lib/worktrees.sh`, worktree-safety tests |
+| Multi-task isolation (per-task metadata, locks, windows) | parallel-scout trial, two concurrent tasks |
+| Terminal-state reconciliation (Design C) | `lib/reconcile.sh`, reconcile tests |
+| Completion gates (done/blocked/failed) | `lib/reconcile.sh`, reconcile tests |
+| Failed-spawn recovery (meta published, rc≠0 downstream) | `lib/firstmate.sh`, fase6-recovery tests |
+| Test suite (220 assertions across 8 suites) | `tests/run-all.sh` |
 
-- Claude / Codex / OpenCode harness abstraction (only `pi` is wired through
-  the Linux-runtime enforcement; other harnesses exist on the machine but are
-  not part of the supported flow)
+### Preview
+
+| Capability | Evidence |
+|------------|----------|
+| Parallel agents (2 concurrent tasks) | parallel-scout trial: two read-only scouts, full isolation |
+| Watcher integration (single watcher, N tasks) | watcher cycles during the parallel-scout trial; upstream behavior |
+| Windows build profiles | `profiles/ingenieumapp.sh` (contract-validated by tests) |
+
+### Experimental
+
+- **Profiles for projects other than the two bundled references.** The
+  profile contract works; a wider set of real projects is needed before the
+  contract can be considered stable.
+
+### Not supported
+
+- Claude / Codex / OpenCode harnesses (only `pi` is validated)
 - Generic harness abstraction
 - Remote workers / multiple machines
 - GUI
@@ -342,13 +396,6 @@ Explicitly out of scope today:
 - CI/CD pipelines
 - Automatic updates
 - Cross-platform support outside Windows + WSL2
-
-## Experimental
-
-- **Windows build profiles beyond the reference adapters**: the profile
-  contract is stable, but only the two bundled profiles exist. Treat
-  third-party profiles as experimental until the contract is exercised by
-  more projects.
 
 ## Roadmap
 
@@ -359,7 +406,7 @@ Broad engineering directions, no commitments or dates:
 - Installation/distribution improvements
 - Documentation and examples
 
-## Compatibility
+## Supported platforms
 
 Validated only on:
 
@@ -387,10 +434,11 @@ Demonstrated end-to-end:
 - Requires a Windows machine with WSL2; no other platform is supported.
 - Worktrees must live on a Windows drive (`/mnt/...`); native WSL paths are
   rejected by design.
+- Only the `pi` harness has been validated.
 - The completion gate depends on `tasks-axi` being installed in the agent
   pane PATH.
 - The Firstmate watcher is a cycle that exits on actionable wakes — it must
-  be re-armed (this is upstream behavior, documented in the runbook).
+  be re-armed (upstream behavior, documented in the runbook).
 - `git` under `/mnt/c` (drvfs) is slower than native Linux git; worktree
   creation takes ~11 s on a large repo.
 
@@ -409,6 +457,7 @@ remain with its original author(s).
 ---
 
 See also: [`docs/architecture.md`](docs/architecture.md) ·
+[`docs/design-decisions.md`](docs/design-decisions.md) ·
 [`docs/runbook.md`](docs/runbook.md) · [`docs/rollback.md`](docs/rollback.md) ·
 [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) ·
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)

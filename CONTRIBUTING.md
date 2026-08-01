@@ -38,10 +38,12 @@ wrapper — the bar for changes is deliberately high.
 
 ## What counts as a good change
 
-- A bug fix with a regression test (the repo history contains real bugs that
-  were fixed exactly this way: `FM_HOME` export in `fmw task send`, the
-  silent `rc=1` on missing meta keys, the shim `FMW_HOME` resolution through
-  the symlink, the tmux `TMUX_PANE` target for non-active windows).
+- A bug fix with a regression test. Known bug patterns in this codebase:
+  fail-closed guards that must not be weakened (teardown, path validation),
+  `FM_HOME` propagation to fail-closed upstream scripts (`fm-send.sh`),
+  silent failures under `set -euo pipefail` (e.g. a no-match `grep` inside
+  command substitution), shim path resolution through symlinks, and tmux
+  window targeting for non-active windows.
 - A portability improvement that removes machine-specific assumptions.
 - Documentation corrections that stay within the documented scope.
 

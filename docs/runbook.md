@@ -37,7 +37,7 @@ tasks-axi --version                       # 0.2.4 (validated 2026-07-31)
 tasks-axi update --help | grep archive-body    # required by Firstmate
 tasks-axi mv --help | grep -E '\[<id>\.\.\.\]|multi' # multiple ids
 # official compatibility check:
-source /home/leo/firstmate/bin/fm-tasks-axi-lib.sh
+source ~/firstmate/bin/fm-tasks-axi-lib.sh
 fm_tasks_axi_compatible && echo "COMPATIBLE"
 ```
 
@@ -53,7 +53,7 @@ CLI, close the protocol and emit done: if the brief is satisfied."
 The official watcher is re-armed with:
 
 ```bash
-bash /home/leo/firstmate/bin/fm-watch-arm.sh   # standalone tracked; beacon
+bash ~/firstmate/bin/fm-watch-arm.sh   # standalone tracked; beacon
 # if there are queued wakes: bin/fm-wake-drain.sh BEFORE re-arming
 ```
 
