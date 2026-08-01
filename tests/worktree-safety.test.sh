@@ -79,8 +79,11 @@ if command -v tmux >/dev/null 2>&1; then
   tmux kill-session -t fmw-testsess 2>/dev/null || true
 fi
 
-# clean teardown (after reverting the change) -> OK, branch kept
+# clean teardown (after reverting the change) -> OK, branch kept.
+# The task is still prepared; teardown now requires an explicit terminal
+# state, so the orphaned-task transition (abandon) must come first.
 git -C "$WTROOT/alpha-audit" checkout -- base.txt 2>/dev/null
+ab_out=$(fmw task abandon alpha-audit --reason "test" 2>&1) && t_ok "abandon (explicit transition) OK" || t_fail "abandon failed: $ab_out"
 td_out=$(fmw task teardown alpha-audit 2>&1) && t_ok "clean teardown OK" || t_fail "clean teardown failed: $td_out"
 echo "$td_out" | grep -q "branch kept" && t_ok "reports branch kept" || t_fail "does not report the branch"
 t_assert_false test -d "$WTROOT/alpha-audit" "worktree removed"

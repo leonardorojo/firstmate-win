@@ -135,7 +135,7 @@ fmw_cli_project() {
 # --- task ---
 fmw_cli_task() {
   local sub="${1:-}"
-  [ -n "$sub" ] || fmw_die "usage: fmw task <prepare|show|list|status|open|teardown>"
+  [ -n "$sub" ] || fmw_die "usage: fmw task <prepare|show|list|status|abandon|teardown>"
   shift || true
   case "$sub" in
     prepare)  fmw_task_prepare "$@" ;;
@@ -143,6 +143,7 @@ fmw_cli_task() {
     list)     fmw_task_list ;;
     status)   [ $# -ge 1 ] || fmw_die "usage: fmw task status <id>"; fmw_task_status "$1" ;;
     teardown) fmw_task_teardown "$@" ;;
+    abandon)  fmw_task_abandon "$@" ;;
     open)     fmw_cli_task_open "$@" ;;
     brief)    fmw_task_brief "$@" ;;
     spawn)    fmw_task_spawn "$@" ;;

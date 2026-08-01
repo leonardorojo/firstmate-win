@@ -101,7 +101,7 @@ new_task recon-blocked || { t_fail "prepare recon-blocked"; }
 fake_answer recon-blocked "state: blocked · source: status-log · tasks-axi not on PATH"
 out="$(status_out recon-blocked)"
 echo "$out" | grep -q '^STATE=blocked$' && t_ok "STATE=blocked persisted" || t_fail "STATE: $(echo "$out" | grep '^STATE=')"
-echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=blocked (eligible only with STATE=done)$' \
+echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=blocked (eligible only with STATE=done or STATE=abandoned)$' \
   && t_ok "blocked not eligible" || t_fail "eligibility: $(echo "$out" | grep '^fm_teardown_elegible=')"
 
 # 3: failed
@@ -110,7 +110,7 @@ new_task recon-failed || { t_fail "prepare recon-failed"; }
 fake_answer recon-failed "state: failed · source: status-log · build failed"
 out="$(status_out recon-failed)"
 echo "$out" | grep -q '^STATE=failed$' && t_ok "STATE=failed persisted" || t_fail "STATE: $(echo "$out" | grep '^STATE=')"
-echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=failed (eligible only with STATE=done)$' \
+echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=failed (eligible only with STATE=done or STATE=abandoned)$' \
   && t_ok "failed not eligible" || t_fail "eligibility: $(echo "$out" | grep '^fm_teardown_elegible=')"
 
 # 4: .turn-ended without terminal state
@@ -153,7 +153,7 @@ fake_answer recon-win-blocked "state: blocked · source: status-log · waiting f
 tmux new-window -t fmw-rec -n fm-recon-win-blocked >/dev/null 2>&1
 out="$(status_out recon-win-blocked)"
 echo "$out" | grep -q '^STATE=blocked$' && t_ok "STATE=blocked with live window" || t_fail "STATE: $(echo "$out" | grep '^STATE=')"
-echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=blocked (eligible only with STATE=done)$' \
+echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=blocked (eligible only with STATE=done or STATE=abandoned)$' \
   && t_ok "not eligible (blocked)" || t_fail "eligibility: $(echo "$out" | grep '^fm_teardown_elegible=')"
 
 # 7b: live window + done + busy-state busy -> NOT eligible (fail-closed)
@@ -184,7 +184,7 @@ fake_answer recon-conflict "FAIL"
 out="$(status_out recon-conflict)"
 echo "$out" | grep -q '^STATE=spawned$' && t_ok "fail-closed: STATE unchanged despite turn-ended+report" || t_fail "STATE: $(echo "$out" | grep '^STATE=')"
 echo "$out" | grep -q '^fm_state=unknown (source unavailable)$' && t_ok "operative state unknown" || t_fail "fm_state"
-echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=spawned (eligible only with STATE=done)$' \
+echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=spawned (eligible only with STATE=done or STATE=abandoned)$' \
   && t_ok "not eligible" || t_fail "eligibility: $(echo "$out" | grep '^fm_teardown_elegible=')"
 
 # 11: missing status -> source unknown
@@ -194,7 +194,7 @@ new_task recon-nostatus || { t_fail "prepare recon-nostatus"; }
 out="$(status_out recon-nostatus)"
 echo "$out" | grep -q '^STATE=spawned$' && t_ok "STATE unchanged with unknown" || t_fail "STATE: $(echo "$out" | grep '^STATE=')"
 echo "$out" | grep -q '^fm_state=unknown$' && t_ok "fm_state=unknown" || t_fail "fm_state: $(echo "$out" | grep '^fm_state=')"
-echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=spawned (eligible only with STATE=done)$' \
+echo "$out" | grep -q '^fm_teardown_elegible=no: STATE=spawned (eligible only with STATE=done or STATE=abandoned)$' \
   && t_ok "not eligible" || t_fail "eligibility"
 
 # 13: corrupt conf

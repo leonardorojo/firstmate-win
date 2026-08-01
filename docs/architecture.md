@@ -214,6 +214,18 @@ agent not busy (no `fm-<id>` window, or a window with busy-state `idle` →
 requires a prior controlled close; `busy`/missing/unreadable ⇒ not eligible).
 `blocked` and `failed` require captain review, not teardown.
 
+## Persistence and recovery
+
+Every owned resource lives on disk: repositories and worktrees on Windows,
+task confs / locks under `state/`, Firstmate metadata and reports under
+`~/firstmate`. The wrapper is stateless between invocations and writes
+atomically, so killing a `fmw` process loses nothing. Processes are the only
+volatile layer: tmux windows, agent processes and the watcher die with their
+server/WSL session and must be re-armed; a task whose window is gone is
+diagnosed (not re-spawned) — `fm_state=unknown`, `STATE` unchanged,
+fail-closed. See `docs/runbook.md` (Resilience and recovery) for the
+per-interruption matrix and recovery procedure.
+
 ## Performance (measured)
 
 - `git status` on a 1337-file Windows repo from WSL: ~39 s first pass.

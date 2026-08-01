@@ -99,6 +99,8 @@ fmw_task_show() {
   echo "BASE_REF=$BASE_REF"
   echo "CREATED_AT=$CREATED_AT"
   echo "CREATED_BY_FMW=$CREATED_BY_FMW"
+  [ -z "${ABANDONED_AT:-}" ] || echo "ABANDONED_AT=$ABANDONED_AT"
+  [ -z "${ABANDON_REASON:-}" ] || echo "ABANDON_REASON=$ABANDON_REASON"
   echo "FIRSTMATE_TASK_ID=${FIRSTMATE_TASK_ID:-}"
   echo "FIRSTMATE_BACKEND=${FIRSTMATE_BACKEND:-}"
   echo "FIRSTMATE_ENDPOINT=${FIRSTMATE_ENDPOINT:-}"
@@ -179,6 +181,103 @@ fmw_task_status() {
   echo "fm_teardown_elegible=$elegible"
 }
 
+# fmw_task_abandon <id> [--reason <text>]
+#   Explicit, fail-closed transition for ORPHANED/INTERRUPTED tasks: the
+#   agent window and process are gone (deliberate resilience interruption),
+#   the operative state is unknown, the worktree is clean at BASE_REF and a
+#   human explicitly invokes this command. Persists STATE=abandoned with
+#   ABANDONED_AT and ABANDON_REASON for traceability. NEVER invents done.
+#   Idempotent: abandoning an already-abandoned task is a no-op (rc=0).
+#   Refuses (rc=1, nothing written) when ANY precondition fails.
+fmw_task_abandon() {
+  local id="" reason="agent window/process lost; explicit operator authorization"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --reason) reason="${2:-}"; shift 2 ;;
+      -*) fmw_die "unknown argument: $1";;
+      *) [ -z "$id" ] && id="$1" || fmw_die "too many arguments: $1"; shift ;;
+    esac
+  done
+  [ -n "$id" ] || fmw_die "usage: fmw task abandon <id> [--reason <text>]"
+
+  fmw_task_load "$id" || return 1
+  case "$STATE" in
+    abandoned)
+      echo "already abandoned: $id (ABANDONED_AT=${ABANDONED_AT:-unknown})"
+      return 0
+      ;;
+    done|blocked|failed|torn-down)
+      fmw_die "task '$id' is $STATE; abandon only applies to non-terminal tasks"
+      ;;
+    prepared|spawned) ;;
+    *) fmw_die "unmanaged STATE='$STATE'; refusing to abandon" ;;
+  esac
+
+  # 1. no agent window (the pane would host a live agent)
+  if fmw_safety_agent_window_exists "$id"; then
+    fmw_die "active agent window fm-$id exists in tmux; abandon requires the window to be gone"
+  fi
+
+  # 2. agent not busy (busy-state 'busy' means a live agent may be working)
+  local busy
+  busy="$(fmw_busy_state_value "$id" 2>/dev/null || true)"
+  [ "$busy" = "busy" ] && fmw_die "agent busy-state is 'busy' (agent may be alive); refusing to abandon"
+
+  # 3. operative state must be unknown (no authoritative source = no live agent)
+  local cs state
+  cs="$(fmw_crew_state "$id" 2>/dev/null)" || cs="unknown|none|source unavailable"
+  state="${cs%%|*}"
+  [ "$state" = "unknown" ] || fmw_die "operative state is '$state' (not unknown); refusing to abandon an agent that may still be alive"
+
+  # 4. worktree: exists, under the registered root, registered with BRANCH
+  local wt_canon root_canon
+  wt_canon="$(fmw_path_canonical "$WORKTREE_WSL_PATH")"
+  root_canon="$(fmw_path_canonical "$WORKTREE_ROOT")"
+  [ -e "$wt_canon" ] || fmw_die "worktree does not exist: $wt_canon (already removed?)"
+  fmw_path_is_under "$wt_canon" "$root_canon" \
+    || fmw_die "worktree outside the registered root: $wt_canon !< $root_canon"
+  [ "$(basename "$wt_canon")" = "$id" ] || fmw_die "worktree basename does not match the task id"
+  fmw_safety_worktree_registered "$REPOSITORY_WSL_PATH" "$wt_canon" "$BRANCH" \
+    || fmw_die "worktree/branch do not match \`git worktree list --porcelain\` — stop and review"
+
+  # 5. worktree clean and at BASE_REF
+  if [ -n "$(git -C "$wt_canon" status --porcelain 2>/dev/null)" ]; then
+    fmw_die "the worktree has local changes; abandoning requires a clean worktree"
+  fi
+  local head_short base_short
+  head_short="$(git -C "$wt_canon" rev-parse --short HEAD 2>/dev/null || echo '?')"
+  base_short="$(printf '%s' "$BASE_REF" | cut -c1-7)"
+  [ "$(git -C "$wt_canon" rev-parse HEAD 2>/dev/null)" = "$BASE_REF" ] \
+    || fmw_die "worktree HEAD ($head_short) != BASE_REF ($base_short); refusing to abandon"
+
+  # 6. lock must be acquirable (an orphan lock FILE never blocks: flock is fd-based)
+  fmw_lock_task "$id" || fmw_die "could not acquire the task lock"
+
+  # 7. persist the explicit transition (never done/blocked; traceable)
+  fmw_conf_write_atomic "$FMW_TASKS_DIR/$id.conf" \
+    "TASK_ID='$TASK_ID'" \
+    "PROJECT_NAME='$PROJECT_NAME'" \
+    "REPOSITORY_WSL_PATH='$REPOSITORY_WSL_PATH'" \
+    "REPOSITORY_WINDOWS_PATH='$REPOSITORY_WINDOWS_PATH'" \
+    "WORKTREE_WSL_PATH='$WORKTREE_WSL_PATH'" \
+    "WORKTREE_WINDOWS_PATH='$WORKTREE_WINDOWS_PATH'" \
+    "WORKTREE_ROOT='$WORKTREE_ROOT'" \
+    "BRANCH='$BRANCH'" \
+    "BASE_REF='$BASE_REF'" \
+    "CREATED_AT='$CREATED_AT'" \
+    "CREATED_BY_FMW='yes'" \
+    "FIRSTMATE_TASK_ID='${FIRSTMATE_TASK_ID:-}'" \
+    "FIRSTMATE_BACKEND='${FIRSTMATE_BACKEND:-}'" \
+    "FIRSTMATE_ENDPOINT='${FIRSTMATE_ENDPOINT:-}'" \
+    "STATE='abandoned'" \
+    "ABANDONED_AT='$(fmw_now_utc)'" \
+    "ABANDON_REASON='$reason'" \
+    || { fmw_unlock_task; fmw_die "could not persist the abandoned state"; }
+  fmw_unlock_task
+  echo "abandoned: $id (STATE=abandoned; reason: $reason)"
+  return 0
+}
+
 # fmw_task_teardown <id> [--force]
 #   Fail-closed chain: ownership + expected path + git + root + branch.
 #   Does NOT discard changes unless --force is explicit. Keeps the branch.
@@ -195,6 +294,20 @@ fmw_task_teardown() {
 
   fmw_task_load "$id" || return 1
   [ "$STATE" != "torn-down" ] || { fmw_log "task already torn down: $id"; return 1; }
+
+  # 0. teardown requires an explicit terminal state: done (agent finished) or
+  #    abandoned (explicit operator authorization for an orphaned task).
+  #    blocked/failed require review; prepared/spawned require resolution.
+  #    --force is the explicit destructive authorization and keeps the
+  #    legacy behavior (discard changes of ANY task).
+  if [ "$force" = 0 ]; then
+    case "$STATE" in
+      done|abandoned) ;;
+      *)
+        fmw_die "task '$id' is $STATE; teardown requires STATE=done or STATE=abandoned (explicit authorization). Resolve the task first."
+        ;;
+    esac
+  fi
 
   # 1. there must be no active agent (tmux window fm-<id>)
   if fmw_safety_agent_window_exists "$id"; then
@@ -247,6 +360,8 @@ fmw_task_teardown() {
       "CREATED_BY_FMW='yes'" \
       "STATE='torn-down'" \
       "ARCHIVED_AT='$(fmw_now_utc)'" \
+      "${ABANDONED_AT:+ABANDONED_AT='$ABANDONED_AT'}" \
+      "${ABANDON_REASON:+ABANDON_REASON='$ABANDON_REASON'}" \
       || fmw_log "warning: could not archive metadata (state/archive/$id.conf)"
     rm -f "$FMW_TASKS_DIR/$id.conf"
     echo "teardown OK: worktree removed ($wt_canon)"
