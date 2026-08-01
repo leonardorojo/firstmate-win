@@ -4,19 +4,21 @@
 
 ```text
 WSL
-├── ~/firstmate            Firstmate upstream (INTACT, installable)
-├── ~/firstmate-win        fmw (this repository)
+├── ~/firstmate            Firstmate upstream (INTACT; cloned manually, never
+│                          modified by fmw; fmw creates its state/ and data/)
+├── ~/firstmate-win        fmw (this repository; cloned manually)
 │   ├── bin/fmw            CLI
+│   ├── bin/install.sh     user-space installer (idempotent, --dry-run)
 │   ├── bin/shims/         treehouse (delegating), node/npm/npx/pi
 │   │                      (Linux runtime guaranteed)
 │   ├── lib/               common config paths safety projects worktrees
 │   │                      windows firstmate reconcile
-│   ├── profiles/          civilplan.sh ingenieumapp.sh (reference adapters)
+│   ├── profiles/          example adapters (validate/build/test/open)
 │   ├── config/projects/   *.conf (4 paths + profile per project)
 │   └── state/{tasks,archive,locks}/
-├── ~/.local/nodejs        native Linux Node (v24.x)
+├── ~/.local/nodejs        native Linux Node (LTS; FMW_LINUX_NODE override)
 ├── ~/.local/npm-global    Linux npm prefix (pi, tasks-axi)
-├── ~/.local/bin           symlinks: node/npm/npx/pi/tasks-axi (pane PATH)
+├── ~/.local/bin           symlinks: pi/tasks-axi (pane PATH)
 └── tmux + git + harnesses (pi)
 
 Windows
@@ -24,6 +26,16 @@ Windows
 └── C:\FirstmateWorktrees
     ├── <project>\<task>   task worktrees (branch firstmate/<task>)
 ```
+
+**Installation boundary.** `bin/install.sh` owns (all user-space, no sudo,
+idempotent, never touches the Windows global PATH or the Firstmate
+upstream): system-prerequisite verification, the Linux Node/npm check, the
+`tasks-axi` and Pi npm packages under `~/.local/npm-global`, the
+`~/.local/bin` symlinks, the executable bits of the repo scripts, the
+`~/.bashrc` PATH entries (with backup), and the Windows worktree root
+verification. Manual by design: cloning Firstmate upstream, the Pi API key
+(`~/.pi/agent`), and registering projects. The installer never downloads
+Node; it verifies the runtime and prints the exact command when missing.
 
 ## Boundaries and responsibilities
 

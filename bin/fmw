@@ -68,6 +68,11 @@ fmw_doctor() {
   check "/mnt/c accessible"           test -d /mnt/c
   check "PowerShell interop"         powershell.exe -NoProfile -Command '$true'
   check "CMD interop"                cmd.exe /c ver
+  if ! command -v powershell.exe >/dev/null 2>&1 || ! command -v cmd.exe >/dev/null 2>&1; then
+    echo "  hint: Windows tools live under /mnt/c/Windows/System32 (and"
+    echo "        System32/WindowsPowerShell/v1.0); a default WSL PATH includes"
+    echo "        them — add them if you overrode PATH."
+  fi
   check "Firstmate home"             test -d "$FMW_FIRSTMATE_HOME/bin"
   check "fm-spawn.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-spawn.sh"
   check "fm-brief.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-brief.sh"

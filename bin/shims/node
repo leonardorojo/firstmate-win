@@ -9,7 +9,7 @@
 # (codex/opencode/cline/copilot). node.exe does not understand WSL paths:
 # existing absolute WSL args are converted with wslpath -w:
 #   /mnt/c/...      -> C:\...            (drvfs)
-#   /home/leo/...   -> \\wsl.localhost\Ubuntu\home\leo\...  (9p)
+#   /home/<user>/... -> \\wsl.localhost\<distro>\home\<user>\...  (9p)
 # Without this, pi receives "Cannot find module 'C:\mnt\c\...'" (path
 # interpreted as relative under the cwd). cwd: when the process runs under
 # /mnt/<drive>/, WSL interop exposes it as <drive>:\... (native Windows work).
