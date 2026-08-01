@@ -91,14 +91,18 @@ fmw_path_validate_worktree_target() {
     || { fmw_log "worktree outside the allowed root: $wt !< $root"; return 1; }
   [ "$(basename "$(fmw_path_canonical "$wt")")" = "$id" ] \
     || { fmw_log "worktree must end with the task id ($id): $wt"; return 1; }
-  # the path must not match the toplevel of any registered repo
-  local pconf repo
+  # the path must not match the toplevel of any registered repo.
+  # Read-only per-config lookup (fmw_conf_value): fmw_conf_load would
+  # overwrite the caller's shell variables with the LAST config of the
+  # directory, contaminating subsequent prepare steps (cross-project leak).
+  local pconf repo pname
   for pconf in "$FMW_PROJECTS_DIR"/*.conf; do
     [ -f "$pconf" ] || continue
-    fmw_conf_load "$pconf" "${FMW_PROJECT_CONF_KEYS[@]}" || continue
-    repo="$(fmw_path_canonical "$PROJECT_WSL_PATH")"
+    repo="$(fmw_conf_value "$pconf" PROJECT_WSL_PATH)" || continue
+    pname="$(fmw_conf_value "$pconf" PROJECT_NAME)"
+    repo="$(fmw_path_canonical "$repo")"
     [ "$(fmw_path_canonical "$wt")" = "$repo" ] \
-      && { fmw_log "worktree cannot be the main checkout of $PROJECT_NAME"; return 1; }
+      && { fmw_log "worktree cannot be the main checkout of $pname"; return 1; }
   done
   return 0
 }

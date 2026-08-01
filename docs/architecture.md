@@ -80,8 +80,9 @@ fmw task teardown T               → no active agent + git registered + clean
 
 ## Parallelism and multi-task isolation
 
-The system supports N concurrent tasks without shared resources between them.
-Each task is a **disjoint set of identifiers and resources**:
+The system supports N concurrent tasks without shared resources between them,
+**including tasks belonging to different registered projects**. Each task is
+a **disjoint set of identifiers and resources**:
 
 | Resource | Isolated by | Mechanism |
 |----------|-------------|-----------|
@@ -112,6 +113,12 @@ Design points that make parallelism possible without upstream changes:
 - **Per-task reconciliation and gate**: `fmw task status <id>` reconciles and
   persists ONLY the indicated task; teardown eligibility is evaluated per task
   and never touches other worktrees/windows.
+- **Per-project isolation**: every task conf carries its own `PROJECT_NAME`,
+  repository path and worktree root; the registry lookup is read-only
+  (`fmw_conf_value`), so iterating over registered projects never leaks one
+  project's values into another task's prepare/brief/spawn steps. Two
+  concurrent scouts on two different repositories (IngenieumApp + CivilPlan)
+  were demonstrated end-to-end with zero metadata cross-contamination.
 
 ### Observed limits
 
@@ -135,6 +142,13 @@ Design points that make parallelism possible without upstream changes:
    does not apply to scouts (kind=scout → report, no merge).
 
 These limits were observed during the two-concurrent-scouts trial.
+
+6. **A stale window from an older task makes the watcher exit early**: if an
+   old `fm-<id>` window (left open by design, awaiting teardown authorization)
+   stops answering the agent heartbeat, the watcher reports it as `stale`
+   and exits before later tasks finish — their terminal events are not
+   watched. This does not affect task state, reconciliation or reports; the
+   watcher must simply be re-armed (and the stale window eventually closed).
 
 ### Recommendations (routine parallelism)
 

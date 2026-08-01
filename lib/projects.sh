@@ -148,14 +148,18 @@ fmw_project_resolve() {
     fmw_conf_load "$FMW_PROJECTS_DIR/$arg.conf" "${FMW_PROJECT_CONF_KEYS[@]}" || return 1
     echo "$PROJECT_NAME"; return 0
   fi
-  # path lookup: the argument or the cwd must be under a registered project
+  # path lookup: the argument or the cwd must be under a registered project.
+  # Read-only per-config lookup (fmw_conf_value) so the caller's shell
+  # variables are never contaminated by the last config of the directory.
   candidate="$(fmw_path_canonical "${arg:-$PWD}")"
+  local repo wtroot
   for pconf in "$FMW_PROJECTS_DIR"/*.conf; do
     [ -f "$pconf" ] || continue
-    fmw_conf_load "$pconf" "${FMW_PROJECT_CONF_KEYS[@]}" || continue
-    if fmw_path_is_under "$candidate" "$PROJECT_WSL_PATH" \
-       || fmw_path_is_under "$candidate" "$PROJECT_WORKTREE_WSL_ROOT"; then
-      echo "$PROJECT_NAME"; return 0
+    repo="$(fmw_conf_value "$pconf" PROJECT_WSL_PATH)" || continue
+    wtroot="$(fmw_conf_value "$pconf" PROJECT_WORKTREE_WSL_ROOT)"
+    if fmw_path_is_under "$candidate" "$repo" \
+       || { [ -n "$wtroot" ] && fmw_path_is_under "$candidate" "$wtroot"; }; then
+      echo "$(basename "$pconf" .conf)"; return 0
     fi
   done
   fmw_die "could not resolve project (registered or under path): ${arg:-$PWD}"
