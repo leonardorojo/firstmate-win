@@ -35,7 +35,7 @@ printf '#!/bin/sh\nprintf "jq-0.0-test\\n"\n' > "$FAKE_JQ"
 printf '#!/bin/sh\nexit 0\n' > "$FAKE_PS"
 printf '#!/bin/sh\nexit 0\n' > "$FAKE_CMD"
 printf '#!/bin/sh\nif [ "${1:-}" = "--version" ]; then echo "treehouse 0.0-test"; else exit 1; fi\n' > "$FAKE_TREEHOUSE"
-printf '#!/bin/sh\ncase "${1:-}" in --version) echo 8.0.0 ;; --info) echo "OS Name: Windows" ;; *) exit 1 ;; esac\n' > "$FAKE_DOTNET"
+printf '#!/bin/sh\ncase "${1:-}" in\n  --version) echo 8.0.0 ;;\n  --info) printf "%%b" "${FAKE_DOTNET_INFO:-OS Name: Windows}"; exit "${FAKE_DOTNET_INFO_RC:-0}" ;;\n  *) exit 1 ;;\nesac\n' > "$FAKE_DOTNET"
 chmod +x "$FAKE_NODE" "$FAKE_PI" "$FAKE_HERDR" "$FAKE_JQ" "$FAKE_PS" "$FAKE_CMD" "$FAKE_TREEHOUSE" "$FAKE_DOTNET"
 for script in fm-spawn.sh fm-brief.sh fm-teardown.sh; do : > "$FAKE_FIRSTMATE/bin/$script"; chmod +x "$FAKE_FIRSTMATE/bin/$script"; done
 
@@ -75,14 +75,17 @@ t_assert_false fmw_doctor_treehouse
 # --- dotnet Windows validation and optional MSBuild ---
 t_begin "portable config: Windows dotnet and optional MSBuild"
 FMW_CFG_WINDOWS_DOTNET="$FAKE_DOTNET"
-t_assert_true fmw_doctor_dotnet
 FMW_CFG_WINDOWS_MSBUILD=""
+export FMW_CFG_WINDOWS_DOTNET FAKE_DOTNET_INFO FAKE_DOTNET_INFO_RC
+FAKE_DOTNET_INFO='OS Name: Windows' FAKE_DOTNET_INFO_RC=0 t_assert_true fmw_doctor_dotnet
+FAKE_DOTNET_INFO='OS Name:     Windows' FAKE_DOTNET_INFO_RC=0 t_assert_true fmw_doctor_dotnet
+FAKE_DOTNET_INFO='OS Platform: Windows' FAKE_DOTNET_INFO_RC=0 t_assert_true fmw_doctor_dotnet
+FAKE_DOTNET_INFO='RID:     win-x64' FAKE_DOTNET_INFO_RC=0 t_assert_true fmw_doctor_dotnet
+FAKE_DOTNET_INFO=$'OS Name:     Windows\r\n' FAKE_DOTNET_INFO_RC=0 t_assert_true fmw_doctor_dotnet
+FAKE_DOTNET_INFO='OS Name: Linux\nRID: linux-x64' FAKE_DOTNET_INFO_RC=0 t_assert_false fmw_doctor_dotnet
+FAKE_DOTNET_INFO='OS Name: Linux\nRID: linux-x64\nMicrosoft.WindowsDesktop.App 8.0.0' FAKE_DOTNET_INFO_RC=0 t_assert_false fmw_doctor_dotnet
+FAKE_DOTNET_INFO='OS Name:     Windows' FAKE_DOTNET_INFO_RC=1 t_assert_false fmw_doctor_dotnet
 t_ok "missing MSBuild is optional"
-printf '#!/bin/sh\necho 8.0.0\n' > "$FMW_TESTLAB/linux-dotnet"
-chmod +x "$FMW_TESTLAB/linux-dotnet"
-FMW_CFG_WINDOWS_DOTNET="$FMW_TESTLAB/linux-dotnet"
-# Linux-looking output must not satisfy the Windows runtime check.
-t_assert_false fmw_doctor_dotnet
 
 # --- full static doctor with no captain, watcher, beacon, or task ---
 t_begin "static doctor: prepared installation without live captain"

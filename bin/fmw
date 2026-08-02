@@ -114,10 +114,12 @@ fmw_doctor_dotnet() {
   [ -x "$candidate" ] || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate is not executable"; return; }
   version="$("$candidate" --version 2>&1)" || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate --version failed"; return; }
   info="$("$candidate" --info 2>&1)" || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate --info failed"; return; }
-  case "$info" in
-    *"OS Name: Windows"*|*"RID: win-"*|*"win32"*) fmw_doctor_pass "Windows dotnet.exe" "$candidate ($version)" ;;
-    *) fmw_doctor_fail "Windows dotnet.exe" "$candidate did not report a Windows runtime" ;;
-  esac
+  if printf '%s\n' "$info" | grep -Eiq \
+    '^[[:space:]]*OS (Name|Platform):[[:space:]]*Windows[[:space:]]*$|^[[:space:]]*RID:[[:space:]]*win-'; then
+    fmw_doctor_pass "Windows dotnet.exe" "$candidate ($version)"
+  else
+    fmw_doctor_fail "Windows dotnet.exe" "$candidate did not report a Windows runtime"
+  fi
 }
 
 fmw_doctor_static() {
