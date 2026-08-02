@@ -6,6 +6,7 @@
 . "$(dirname "$0")/harness.sh"
 
 fmw_test_setup_sandbox
+fmw_test_assert_sandboxed
 fmw_test_make_repo "$FMW_TESTLAB/repo-a"
 fmw_test_make_repo "$FMW_TESTLAB/repo-b"
 fmw_test_make_profile "pa"

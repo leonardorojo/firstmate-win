@@ -13,6 +13,7 @@
 . "$FMW_LIB_DIR/reconcile.sh"   # fmw_task_reconcile / teardown eligibility
 
 fmw_test_setup_sandbox
+fmw_test_assert_sandboxed
 fmw_test_make_repo "$FMW_TESTLAB/repo"
 fmw_test_make_profile "abnd"
 mkdir -p "$FMW_TESTLAB/wt"

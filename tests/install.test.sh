@@ -14,6 +14,7 @@
 . "$(dirname "$0")/harness.sh"
 
 fmw_test_setup_sandbox
+fmw_test_assert_sandboxed
 INST="$FMW_TESTLAB/home"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$INST" "$FMW_TESTLAB/cleanbin" "$FMW_TESTLAB/fakewin" "$FMW_TESTLAB/fakebin"

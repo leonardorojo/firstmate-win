@@ -14,6 +14,7 @@
 . "$FMW_LIB_DIR/firstmate.sh"   # fmw_task_conf_set (not loaded by the harness)
 
 fmw_test_setup_sandbox
+fmw_test_assert_sandboxed
 fmw_test_make_repo "$FMW_TESTLAB/repo"
 fmw_test_make_profile "resil"
 mkdir -p "$FMW_TESTLAB/wt"

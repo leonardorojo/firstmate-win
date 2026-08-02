@@ -84,7 +84,8 @@ fmw_test_clean_sandbox() {
 fmw_test_setup_sandbox() {
   fmw_test_clean_sandbox || return 1
   mkdir -p "$FMW_SANDBOX/state/tasks" "$FMW_SANDBOX/state/archive" "$FMW_SANDBOX/state/locks" \
-           "$FMW_SANDBOX/config/projects" "$FMW_SANDBOX/profiles"
+           "$FMW_SANDBOX/config/projects" "$FMW_SANDBOX/profiles" \
+    || { echo "   FATAL: could not create the sandbox ($FMW_SANDBOX)"; return 1; }
   export FMW_STATE="$FMW_SANDBOX/state"
   export FMW_TASKS_DIR="$FMW_SANDBOX/state/tasks"
   export FMW_ARCHIVE_DIR="$FMW_SANDBOX/state/archive"
@@ -94,8 +95,33 @@ fmw_test_setup_sandbox() {
   export FMW_FIRSTMATE_HOME="$FMW_SANDBOX/fake-firstmate"
   export FMW_SKIP_INTEROP_CHECK=1   # PowerShell interop not exercised in the sandbox
   export FMW_SKIP_RUNTIME_CHECK=1   # pi/pi-signed runtime: the sandbox does not install Pi (see runtime.test.sh)
-  mkdir -p "$FMW_FIRSTMATE_HOME/state" "$FMW_FIRSTMATE_HOME/bin"
+  mkdir -p "$FMW_FIRSTMATE_HOME/state" "$FMW_FIRSTMATE_HOME/bin" \
+    || { echo "   FATAL: could not create the fake Firstmate home"; return 1; }
   fmw_ensure_dirs
+  # Isolation guard: every test-owned path MUST live inside the sandbox.
+  # A broken setup (e.g. two test processes sharing the sandbox) must abort
+  # here instead of silently writing test fakes over the REAL environment —
+  # that corrupted ~/firstmate/bin/fm-crew-state.sh once (Sprint 7 incident).
+  case "$FMW_FIRSTMATE_HOME" in
+    "$FMW_SANDBOX"/*) ;;
+    *)
+      echo "   FATAL: FMW_FIRSTMATE_HOME ($FMW_FIRSTMATE_HOME) is OUTSIDE the sandbox ($FMW_SANDBOX); refusing to continue (test isolation broken)" >&2
+      return 1
+      ;;
+  esac
+}
+
+# fmw_test_assert_sandboxed — hard guard for tests that write fakes into the
+# Firstmate home: aborts unless every test-owned path is under the sandbox.
+# Call it right before writing fake files if the setup could have failed.
+fmw_test_assert_sandboxed() {
+  case "$FMW_FIRSTMATE_HOME" in
+    "$FMW_SANDBOX"/*) ;;
+    *)
+      echo "   FATAL: refusing to write test fakes outside the sandbox (FMW_FIRSTMATE_HOME=$FMW_FIRSTMATE_HOME)" >&2
+      exit 1
+      ;;
+  esac
 }
 
 # fmw_test_make_repo <dir> — create a disposable git repo with 1 commit
