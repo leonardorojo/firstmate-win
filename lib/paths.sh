@@ -76,6 +76,29 @@ fmw_path_validate_worktree_root() {
   return 0
 }
 
+fmw_path_is_absolute_wsl() {
+  case "$1" in /?*) return 0 ;; *) return 1 ;; esac
+}
+
+fmw_path_parent_writable() {
+  local path="$1" parent
+  parent="$(dirname "$(fmw_path_canonical "$path")")"
+  while [ "$parent" != / ] && [ ! -d "$parent" ]; do parent="$(dirname "$parent")"; done
+  [ -d "$parent" ] && [ -w "$parent" ]
+}
+
+# fmw_detect_windows_root returns one unambiguous mounted Windows root.
+# Multiple mounted drives deliberately produce no default.
+fmw_detect_windows_root() {
+  local candidate count=0 found=''
+  for candidate in /mnt/[a-z]; do
+    [ -d "$candidate" ] || continue
+    count=$((count + 1)); found="$candidate"
+  done
+  [ "$count" = 1 ] || return 1
+  printf '%s\n' "$found"
+}
+
 # fmw_path_validate_worktree_target <wt-path> <root-wsl-path> <task-id>
 #   Fail-closed validation of a worktree path BEFORE creating it:
 #     - the path must NOT exist (collision)

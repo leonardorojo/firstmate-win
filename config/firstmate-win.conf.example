@@ -1,0 +1,12 @@
+# Portable firstmate-win installation configuration.
+# Copy to the user config path reported by `fmw config show`.
+# Values are parsed as allowlisted key=value records, never sourced as shell.
+# Use WSL absolute paths. Do not commit a machine's real paths or live state.
+
+# FIRSTMATE_ROOT='/path/to/firstmate'
+# FM_HOME='/path/to/shared-firstmate-home'
+# FMW_REPOS_ROOT='/mnt/<drive>/repos'
+# FMW_WORKTREES_ROOT='/mnt/<drive>/worktrees'
+# TREEHOUSE_BIN='/path/to/real/treehouse'
+# WINDOWS_DOTNET='/mnt/<drive>/Windows/dotnet.exe'
+# WINDOWS_MSBUILD='/mnt/<drive>/Program Files/Microsoft Visual Studio/.../MSBuild.exe'

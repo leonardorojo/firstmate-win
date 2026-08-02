@@ -10,8 +10,13 @@ for _lib in common config paths safety projects worktrees windows runtime firstm
 done
 unset _lib
 
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift || true
 fmw_is_inside_wsl || { echo "fmw: ERROR: must run inside WSL (wslpath missing)" >&2; exit 1; }
-fmw_ensure_dirs
+case "$cmd" in
+  doctor|config) : ;;  # static commands must not create runtime state
+  *) fmw_ensure_dirs ;;
+esac
 
 fmw_help() {
   cat <<'EOF'
@@ -20,7 +25,8 @@ fmw — firstmate-win: Firstmate orchestrates in WSL; repos and worktrees on Win
 USAGE
   fmw version                      wrapper version
   fmw help                         this help
-  fmw doctor                       environment diagnostics (WSL/Windows)
+  fmw doctor [options]             static environment diagnostics (WSL/Windows)
+  fmw config show [options]         effective portable configuration
 
   fmw path to-wsl <p>              Windows path -> WSL (wslpath -u)
   fmw path to-windows <p>          WSL path -> Windows (wslpath -w)
@@ -51,55 +57,150 @@ USAGE
 EOF
 }
 
-# --- doctor ---
-fmw_doctor() {
-  local ok=1
-  local label rc
-  check() { label="$1"; shift; if "$@" >/dev/null 2>&1; then echo "  [PASS] $label"; else echo "  [FAIL] $label"; ok=0; fi; }
+# --- portable configuration and static doctor -------------------------------
+fmw_doctor_line() { printf '  [%s] %s' "$1" "$2"; [ -n "${3:-}" ] && printf ': %s' "$3"; printf '\n'; }
+fmw_doctor_fail() { fmw_doctor_line FAIL "$1" "${2:-}"; FMW_DOCTOR_OK=0; return 1; }
+fmw_doctor_pass() { fmw_doctor_line PASS "$1" "${2:-}"; }
+fmw_doctor_warn() { fmw_doctor_line WARN "$1" "${2:-}"; }
+fmw_doctor_skip() { fmw_doctor_line SKIP "$1" "${2:-}"; }
 
-  echo "fmw doctor ($FMW_VERSION) — WSL runtime"
-  echo "  FMW_HOME=$FMW_HOME"
-  echo "  Firstmate=$FMW_FIRSTMATE_HOME"
-  echo "  state=$FMW_STATE"
-  check "wslpath (WSL runtime)"      command -v wslpath
-  check "git"                        git --version
-  check "tmux"                       tmux -V
-  check "flock (locking)"            command -v flock
-  check "/mnt/c accessible"           test -d /mnt/c
-  check "PowerShell interop"         powershell.exe -NoProfile -Command '$true'
-  check "CMD interop"                cmd.exe /c ver
-  if ! command -v powershell.exe >/dev/null 2>&1 || ! command -v cmd.exe >/dev/null 2>&1; then
-    echo "  hint: Windows tools live under /mnt/c/Windows/System32 (and"
-    echo "        System32/WindowsPowerShell/v1.0); a default WSL PATH includes"
-    echo "        them — add them if you overrode PATH."
+fmw_doctor_path() {
+  local label="$1" path="$2" require_dir="${3:-0}"
+  if ! fmw_path_is_absolute_wsl "$path"; then
+    fmw_doctor_fail "$label" "not an absolute WSL path; set the corresponding configuration key"
+    return 1
   fi
-  check "Firstmate home"             test -d "$FMW_FIRSTMATE_HOME/bin"
-  check "fm-spawn.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-spawn.sh"
-  check "fm-brief.sh"                test -f "$FMW_FIRSTMATE_HOME/bin/fm-brief.sh"
-  check "fm-teardown.sh"             test -f "$FMW_FIRSTMATE_HOME/bin/fm-teardown.sh"
-  check "state directories"          test -d "$FMW_TASKS_DIR"
-  # runtime: Node and Pi must be native Linux processes in WSL
-  if out="$(fmw_runtime_node_linux)"; then
-    echo "  [PASS] Linux Node: $out"
+  if [ "$require_dir" = 1 ] && [ ! -d "$path" ]; then
+    fmw_doctor_fail "$label" "$path is not an existing directory"
+    return 1
+  fi
+  fmw_doctor_pass "$label" "$path"
+  return 0
+}
+
+fmw_doctor_firstmate() {
+  local root="$FMW_CFG_FIRSTMATE_ROOT" script
+  fmw_doctor_path "FIRSTMATE_ROOT" "$root" 1 || return
+  for script in fm-spawn.sh fm-brief.sh fm-teardown.sh; do
+    if [ -f "$root/bin/$script" ]; then
+      fmw_doctor_pass "Firstmate $script" "$root/bin/$script"
+    else
+      fmw_doctor_fail "Firstmate $script" "missing; install or configure FIRSTMATE_ROOT=$root"
+    fi
+  done
+}
+
+fmw_doctor_treehouse() {
+  local candidate="$FMW_CFG_TREEHOUSE_BIN" real shim version
+  [ -n "$candidate" ] || { fmw_doctor_fail "TREEHOUSE_BIN" "not found; set TREEHOUSE_BIN to the real executable"; return; }
+  [ -x "$candidate" ] || { fmw_doctor_fail "TREEHOUSE_BIN" "$candidate is not executable"; return; }
+  real="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+  shim="$(readlink -f "$FMW_SHIMS_DIR/treehouse" 2>/dev/null || true)"
+  if [ -n "$shim" ] && [ "$real" = "$shim" ]; then
+    fmw_doctor_fail "real Treehouse" "$candidate resolves to the firstmate-win shim; configure the real Treehouse binary"
+    return
+  fi
+  version="$("$real" --version 2>&1)" || { fmw_doctor_fail "real Treehouse" "$real --version failed; do not update it automatically"; return; }
+  fmw_doctor_pass "real Treehouse" "$real ($version)"
+}
+
+fmw_doctor_dotnet() {
+  local candidate="$FMW_CFG_WINDOWS_DOTNET" version info
+  [ -n "$candidate" ] || { fmw_doctor_fail "WINDOWS_DOTNET" "dotnet.exe not found; set WINDOWS_DOTNET"; return; }
+  [ -x "$candidate" ] || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate is not executable"; return; }
+  version="$("$candidate" --version 2>&1)" || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate --version failed"; return; }
+  info="$("$candidate" --info 2>&1)" || { fmw_doctor_fail "WINDOWS_DOTNET" "$candidate --info failed"; return; }
+  case "$info" in
+    *"OS Name: Windows"*|*"RID: win-"*|*"win32"*) fmw_doctor_pass "Windows dotnet.exe" "$candidate ($version)" ;;
+    *) fmw_doctor_fail "Windows dotnet.exe" "$candidate did not report a Windows runtime" ;;
+  esac
+}
+
+fmw_doctor_static() {
+  local explicit=("$@") out pi_path herdr_path jq_path npm_path
+  FMW_DOCTOR_OK=1
+  fmw_config_resolve "${explicit[@]}" || { fmw_doctor_fail "portable configuration" "invalid allowlisted config; see the error above"; return 1; }
+  echo "fmw doctor ($FMW_VERSION) — static WSL/Windows installation"
+  echo "  config=$(fmw_config_default_file)"
+  echo "  FIRSTMATE_ROOT=$FMW_CFG_FIRSTMATE_ROOT"
+  echo "  FM_HOME=$FMW_CFG_FM_HOME"
+  echo "  FMW_REPOS_ROOT=$FMW_CFG_REPOS_ROOT"
+  echo "  FMW_WORKTREES_ROOT=$FMW_CFG_WORKTREES_ROOT"
+  echo "  TREEHOUSE_BIN=$FMW_CFG_TREEHOUSE_BIN"
+  echo "  WINDOWS_DOTNET=$FMW_CFG_WINDOWS_DOTNET"
+  echo "  WINDOWS_MSBUILD=${FMW_CFG_WINDOWS_MSBUILD:-<optional>}
+"
+
+  fmw_is_inside_wsl && fmw_doctor_pass "WSL runtime" "wslpath present" || fmw_doctor_fail "WSL runtime" "wslpath is missing"
+  command -v git >/dev/null 2>&1 && fmw_doctor_pass "WSL Git" "$(command -v git)" || fmw_doctor_fail "WSL Git" "git is missing"
+  command -v wslpath >/dev/null 2>&1 && fmw_doctor_pass "wslpath" "$(command -v wslpath)" || true
+  command -v jq >/dev/null 2>&1 && fmw_doctor_pass "jq" "$(command -v jq)" || fmw_doctor_fail "jq" "install jq in WSL"
+  if herdr_path="$(command -v herdr 2>/dev/null)" && out="$(herdr --version 2>&1)"; then
+    fmw_doctor_pass "Herdr installed" "$herdr_path ($out)"
   else
-    echo "  [FAIL] Linux Node: $out"
-    ok=0
+    fmw_doctor_fail "Herdr installed" "herdr is missing or --version failed"
   fi
-  if out="$(fmw_runtime_pi_linux)"; then
-    echo "  [PASS] Linux Pi: $out"
+  if pi_path="$(command -v pi 2>/dev/null)" && out="$(pi --version 2>&1)"; then
+    fmw_doctor_pass "Pi installed" "$pi_path ($out)"
   else
-    echo "  [FAIL] Linux Pi: $out"
-    ok=0
+    fmw_doctor_fail "Pi installed" "pi is missing or --version failed"
   fi
-  echo "  [INFO] node on PATH: $(command -v node 2>/dev/null || echo missing)"
-  echo "  [INFO] pi on PATH:   $(command -v pi 2>/dev/null || echo missing)"
-  if command -v treehouse >/dev/null 2>&1; then
-    echo "  [INFO] treehouse installed: $(command -v treehouse) (the fmw shim will intercept it only for fmw tasks)"
+  if out="$(fmw_runtime_node_linux 2>&1)"; then
+    fmw_doctor_pass "Linux Node" "$out"
   else
-    echo "  [INFO] treehouse NOT installed (not needed for the fmw flow; the shim delegates if it appears)"
+    fmw_doctor_fail "Linux Node" "$out"
   fi
-  [ "$ok" = 1 ] && echo "  -> environment OK" || echo "  -> environment has failures"
-  return $((ok ? 0 : 1))
+  if out="$(fmw_runtime_pi_linux 2>&1)"; then
+    fmw_doctor_pass "Linux Pi" "$out"
+  else
+    fmw_doctor_fail "Linux Pi" "$out"
+  fi
+  command -v powershell.exe >/dev/null 2>&1 && fmw_doctor_pass "Windows interop: PowerShell" "$(command -v powershell.exe)" || fmw_doctor_fail "Windows interop: PowerShell" "powershell.exe is missing"
+  command -v cmd.exe >/dev/null 2>&1 && fmw_doctor_pass "Windows interop: CMD" "$(command -v cmd.exe)" || fmw_doctor_fail "Windows interop: CMD" "cmd.exe is missing"
+  npm_path="$(command -v npm 2>/dev/null || true)"
+  [ -n "$npm_path" ] && fmw_doctor_pass "npm PATH" "$npm_path" || fmw_doctor_warn "npm PATH" "npm is not required for every installed runtime"
+
+  fmw_doctor_firstmate
+  fmw_doctor_treehouse
+  fmw_doctor_dotnet
+  if [ -n "$FMW_CFG_WINDOWS_MSBUILD" ]; then
+    [ -x "$FMW_CFG_WINDOWS_MSBUILD" ] && fmw_doctor_pass "optional MSBuild" "$FMW_CFG_WINDOWS_MSBUILD" || fmw_doctor_fail "optional MSBuild" "$FMW_CFG_WINDOWS_MSBUILD is not executable"
+  else
+    fmw_doctor_warn "optional MSBuild" "not configured; dotnet.exe may be sufficient"
+  fi
+
+  fmw_doctor_path "FM_HOME" "$FMW_CFG_FM_HOME" 0
+  case "$FMW_CFG_FM_HOME" in /tmp/*|/var/tmp/*) fmw_doctor_fail "FM_HOME safety" "$FMW_CFG_FM_HOME looks temporary; configure a durable home" ;; esac
+  if [ -n "$FMW_CFG_REPOS_ROOT" ]; then
+    fmw_path_is_windows_mounted "$FMW_CFG_REPOS_ROOT" && [ -d "$FMW_CFG_REPOS_ROOT" ] \
+      && fmw_doctor_pass "FMW_REPOS_ROOT" "$FMW_CFG_REPOS_ROOT" \
+      || fmw_doctor_fail "FMW_REPOS_ROOT" "$FMW_CFG_REPOS_ROOT must be an accessible /mnt/<drive> directory"
+  else
+    fmw_doctor_fail "FMW_REPOS_ROOT" "ambiguous or undetected Windows mount; configure FMW_REPOS_ROOT"
+  fi
+  if [ -n "$FMW_CFG_WORKTREES_ROOT" ] && fmw_path_is_windows_mounted "$FMW_CFG_WORKTREES_ROOT" \
+      && fmw_path_reject_native_wsl "$FMW_CFG_WORKTREES_ROOT" >/dev/null 2>&1 \
+      && fmw_path_parent_writable "$FMW_CFG_WORKTREES_ROOT"; then
+    fmw_doctor_pass "FMW_WORKTREES_ROOT" "$FMW_CFG_WORKTREES_ROOT (no worktree created)"
+  else
+    fmw_doctor_fail "FMW_WORKTREES_ROOT" "$FMW_CFG_WORKTREES_ROOT must be a writable or creatable /mnt/<drive> root"
+  fi
+  if [ "$FMW_DOCTOR_OK" = 1 ]; then
+    echo "  -> static installation OK (captain/watcher/tasks are not required)"
+    return 0
+  fi
+  echo "  -> static installation has failures"
+  return 1
+}
+
+fmw_doctor() { fmw_doctor_static "$@"; }
+
+fmw_config_show() {
+  fmw_config_resolve "$@" || return
+  printf 'config=%s\nFIRSTMATE_ROOT=%s\nFM_HOME=%s\nFMW_REPOS_ROOT=%s\nFMW_WORKTREES_ROOT=%s\nTREEHOUSE_BIN=%s\nWINDOWS_DOTNET=%s\nWINDOWS_MSBUILD=%s\n' \
+    "$(fmw_config_default_file)" "$FMW_CFG_FIRSTMATE_ROOT" "$FMW_CFG_FM_HOME" \
+    "$FMW_CFG_REPOS_ROOT" "$FMW_CFG_WORKTREES_ROOT" "$FMW_CFG_TREEHOUSE_BIN" \
+    "$FMW_CFG_WINDOWS_DOTNET" "$FMW_CFG_WINDOWS_MSBUILD"
 }
 
 # --- path ---
@@ -120,6 +221,16 @@ fmw_cli_path() {
         fmw_die "does not resolve under /mnt/<drive>/: $(fmw_path_canonical "$p")"
       fi ;;
     *) fmw_die "unknown subcommand: $sub";;
+  esac
+}
+
+# --- config ---
+fmw_cli_config() {
+  local sub="${1:-show}"
+  shift || true
+  case "$sub" in
+    show) fmw_config_show "$@" ;;
+    *) fmw_die "unknown config command: $sub (use: fmw config show)" ;;
   esac
 }
 
@@ -209,12 +320,14 @@ fmw_cli_open() {
 }
 
 # --- dispatch ---
-cmd="${1:-help}"
-[ $# -gt 0 ] && shift || true
+if [ "${FMW_NO_DISPATCH:-0}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
 case "$cmd" in
   version)          echo "fmw $FMW_VERSION" ;;
   help|--help|-h)   fmw_help ;;
-  doctor)           fmw_doctor ;;
+  doctor)           fmw_doctor "$@" ;;
+  config)           fmw_cli_config "$@" ;;
   path)             fmw_cli_path "$@" ;;
   project)          fmw_cli_project "$@" ;;
   task)             fmw_cli_task "$@" ;;
