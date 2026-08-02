@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: fmw help
 
 FMW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" && pwd)"
-for _lib in common config paths safety projects worktrees windows runtime firstmate reconcile; do
+for _lib in common config paths safety projects worktrees windows runtime firstmate reconcile captain; do
   . "$FMW_LIB_DIR/$_lib.sh"
 done
 unset _lib
@@ -14,7 +14,7 @@ cmd="${1:-help}"
 [ $# -gt 0 ] && shift || true
 fmw_is_inside_wsl || { echo "fmw: ERROR: must run inside WSL (wslpath missing)" >&2; exit 1; }
 case "$cmd" in
-  doctor|config) : ;;  # static commands must not create runtime state
+  doctor|config|captain) : ;;  # diagnostic/guide commands must not create runtime state
   *) fmw_ensure_dirs ;;
 esac
 
@@ -27,6 +27,8 @@ USAGE
   fmw help                         this help
   fmw doctor [options]             static environment diagnostics (WSL/Windows)
   fmw config show [options]         effective portable configuration
+  fmw captain                       validate Herdr and print the safe Pi start command
+  fmw captain status [options]      read-only operational captain/watcher diagnosis
 
   fmw path to-wsl <p>              Windows path -> WSL (wslpath -u)
   fmw path to-windows <p>          WSL path -> Windows (wslpath -w)
@@ -328,6 +330,7 @@ case "$cmd" in
   help|--help|-h)   fmw_help ;;
   doctor)           fmw_doctor "$@" ;;
   config)           fmw_cli_config "$@" ;;
+  captain)          fmw_captain "$@" ;;
   path)             fmw_cli_path "$@" ;;
   project)          fmw_cli_project "$@" ;;
   task)             fmw_cli_task "$@" ;;

@@ -19,7 +19,7 @@ cd "$(dirname "$0")" || exit 1
 fmw_test_clean_sandbox || { echo "FATAL: could not clean the sandbox; aborting" >&2; exit 1; }
 
 suites=("$@")
-[ "${#suites[@]}" -gt 0 ] || suites=(paths.test.sh project-registry.test.sh portable-config.test.sh worktree-safety.test.sh firstmate-adapter.test.sh fase6-recovery.test.sh profile-ingenieumapp.test.sh runtime.test.sh reconcile.test.sh multirepo.test.sh resilience.test.sh abandon.test.sh install.test.sh crewstate-recovery.test.sh)
+[ "${#suites[@]}" -gt 0 ] || suites=(paths.test.sh project-registry.test.sh portable-config.test.sh captain-operations.test.sh worktree-safety.test.sh firstmate-adapter.test.sh fase6-recovery.test.sh profile-ingenieumapp.test.sh runtime.test.sh reconcile.test.sh multirepo.test.sh resilience.test.sh abandon.test.sh install.test.sh crewstate-recovery.test.sh)
 
 total_fail=0
 for suite in "${suites[@]}"; do
