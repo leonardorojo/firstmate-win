@@ -14,7 +14,7 @@ cmd="${1:-help}"
 [ $# -gt 0 ] && shift || true
 fmw_is_inside_wsl || { echo "fmw: ERROR: must run inside WSL (wslpath missing)" >&2; exit 1; }
 case "$cmd" in
-  doctor|config|captain) : ;;  # diagnostic/guide commands must not create runtime state
+  doctor|config|captain|win) : ;;  # diagnostic/guide/tool commands must not create runtime state
   *) fmw_ensure_dirs ;;
 esac
 
@@ -29,6 +29,8 @@ USAGE
   fmw config show [options]         effective portable configuration
   fmw captain                       validate Herdr and print the safe Pi start command
   fmw captain status [options]      read-only operational captain/watcher diagnosis
+  fmw win exec --cwd <wsl-dir> [--report] [--backend direct|powershell] -- <exe> [args...]
+                                      run one Windows tool with individual arguments
 
   fmw path to-wsl <p>              Windows path -> WSL (wslpath -u)
   fmw path to-windows <p>          WSL path -> Windows (wslpath -w)
@@ -293,6 +295,38 @@ fmw_cli_task_open() {
   fmw_open "$WORKTREE_WSL_PATH" "$target"
 }
 
+# --- Windows tool execution ---
+fmw_cli_win() {
+  local sub="${1:-}" cwd="${PWD}" backend=direct report=0 separator=0 executable
+  local -a tool_args=() config_args=()
+  [ -n "$sub" ] || fmw_die "usage: fmw win exec [--cwd <absolute-wsl-dir>] [--report] -- <executable> [args...]"
+  shift
+  [ "$sub" = exec ] || fmw_die "unknown win command: $sub (use: fmw win exec)"
+  while [ $# -gt 0 ]; do
+    if [ "$separator" = 1 ]; then
+      tool_args+=("$1"); shift; continue
+    fi
+    case "$1" in
+      --) separator=1; shift ;;
+      --cwd) [ $# -ge 2 ] || fmw_die "--cwd requires an absolute WSL directory"; cwd="$2"; shift 2 ;;
+      --backend) [ $# -ge 2 ] || fmw_die "--backend requires direct or powershell"; backend="$2"; shift 2 ;;
+      --report) report=1; shift ;;
+      --config|--windows-dotnet|--windows-msbuild)
+        [ $# -ge 2 ] || fmw_die "$1 requires a value"
+        config_args+=("$1" "$2"); shift 2 ;;
+      -*) fmw_die "unknown win exec option: $1 (put executable options after --)" ;;
+      *) fmw_die "win exec requires -- before the executable" ;;
+    esac
+  done
+  [ "$separator" = 1 ] && [ "${#tool_args[@]}" -gt 0 ] || fmw_die "win exec requires -- <executable> [args...]"
+  executable="${tool_args[0]}"
+  tool_args=("${tool_args[@]:1}")
+  case "$backend" in direct|powershell) ;; *) fmw_die "unknown backend: $backend (direct|powershell)" ;; esac
+  fmw_config_resolve "${config_args[@]}" || return 1
+  fmw_win_validate_cwd "$cwd" || return 1
+  fmw_win_exec "$cwd" "$backend" "$report" "$executable" "${tool_args[@]}"
+}
+
 # --- exec ---
 fmw_cli_exec() {
   local sub="${1:-}"
@@ -331,6 +365,7 @@ case "$cmd" in
   doctor)           fmw_doctor "$@" ;;
   config)           fmw_cli_config "$@" ;;
   captain)          fmw_captain "$@" ;;
+  win)              fmw_cli_win "$@" ;;
   path)             fmw_cli_path "$@" ;;
   project)          fmw_cli_project "$@" ;;
   task)             fmw_cli_task "$@" ;;
